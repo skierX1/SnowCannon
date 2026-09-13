@@ -33,7 +33,6 @@ namespace SnowCannon
         Text levelText;
         Text timeText;
         Text scoreText;
-        Text hitsText;
 
         GameObject gameOverPanel;
         Text finalScoreText;
@@ -187,10 +186,10 @@ namespace SnowCannon
 
         void UpdatePlaying()
         {
-            // ESC stops the run at any time, straight to the game-over card.
+            // ESC leaves the game at any time, straight out of the application.
             if (Controls != null && Controls.IsEscapePressed())
             {
-                GameOver(false);
+                GameFlow.Quit();
                 return;
             }
 
@@ -245,7 +244,9 @@ namespace SnowCannon
             sm.transform.position = new Vector3(x, 0f, GameConfig.SpawnZ);
             active.Add(sm);
             totalSpawned++;
+#if UNITY_EDITOR
             if (smokeEnabled) SmokeLog("spawn@" + smokeElapsed.ToString("0.0") + " x=" + x.ToString("0.0"));
+#endif
         }
 
         // ---- game over ----------------------------------------------------------
@@ -285,8 +286,7 @@ namespace SnowCannon
             {
                 finalScoreText.text =
                     "FINAL SCORE   " + score + "\n" +
-                    "LEVEL REACHED   " + level + "\n" +
-                    "SNOWMEN HIT   " + hits + "\n\n" +
+                    "LEVEL REACHED   " + level + "\n\n" +
                     "HIGH SCORE   " + Settings.HighScore + "\n\n" +
                     "tap anywhere to continue";
             }
@@ -317,7 +317,9 @@ namespace SnowCannon
         {
             score += points;
             hits++;
+#if UNITY_EDITOR
             if (smokeEnabled) SmokeLog("REGISTERHIT pts=" + points + " hits=" + hits + " score=" + score);
+#endif
             if (AudioDirector.Instance != null)
             {
                 AudioDirector.Instance.PlayScream(target.transform.position);
@@ -343,7 +345,6 @@ namespace SnowCannon
             levelText = AddLine(board, "level", 34, new Vector2(-16f, -34f));
             timeText = AddLine(board, "time", 46, new Vector2(-16f, -84f));
             scoreText = AddLine(board, "score", 34, new Vector2(-16f, -140f));
-            hitsText = AddLine(board, "hits", 30, new Vector2(-16f, -184f));
 
             // Centre game-over card, hidden until the run ends.
             var over = Ui.NewRect("gameover", root);
@@ -384,7 +385,6 @@ namespace SnowCannon
             levelText.text = "LEVEL  " + level;
             timeText.text = Mathf.CeilToInt(Mathf.Max(0f, levelTimer)).ToString();
             scoreText.text = "SCORE  " + score;
-            hitsText.text = "SNOWMEN HIT  " + hits;
         }
 
         // ---- debug hooks used by the editor smoke test -------------------------
@@ -600,7 +600,6 @@ namespace SnowCannon
             if (levelText != null && levelText.gameObject.activeInHierarchy) n++;
             if (timeText != null && timeText.gameObject.activeInHierarchy) n++;
             if (scoreText != null && scoreText.gameObject.activeInHierarchy) n++;
-            if (hitsText != null && hitsText.gameObject.activeInHierarchy) n++;
             return n;
         }
 

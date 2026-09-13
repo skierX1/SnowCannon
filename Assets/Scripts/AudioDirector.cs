@@ -19,6 +19,11 @@ namespace SnowCannon
         readonly List<AudioSource> screamPool = new List<AudioSource>();
         AudioSource musicSource;
 
+        // Lazily resolved reflection handle to the mobile-only Handheld.Vibrate(), kept off the
+        // compile path so the desktop player builds (see Vibrate()).
+        bool vibrateResolved;
+        System.Reflection.MethodInfo vibrate;
+
         int nextThrow;
         int nextScream;
 
@@ -138,10 +143,29 @@ namespace SnowCannon
         }
 
         /// <summary>Short haptic tick on a hit, ignored on desktop.</summary>
+        /// <remarks>
+        /// <c>UnityEngine.Handheld</c> only exists in the mobile player modules, so a direct
+        /// <c>Handheld.Vibrate()</c> call compiles in the editor (where every platform assembly is
+        /// loaded) yet fails to build for the desktop player with CS0103. We reach it through
+        /// reflection instead: no compile-time reference to the stripped type, so the desktop build
+        /// succeeds and the call simply no-ops where haptics aren't available.
+        /// </remarks>
         public void Vibrate()
         {
             if (!Settings.Vibration) return;
-            Handheld.Vibrate();
+            if (!vibrateResolved)
+            {
+                vibrateResolved = true;
+                foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var t = asm.GetType("UnityEngine.Handheld", false);
+                    if (t == null) continue;
+                    vibrate = t.GetMethod("Vibrate", System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.Static, null, new System.Type[0], null);
+                    break;
+                }
+            }
+            try { vibrate?.Invoke(null, null); } catch { }
         }
     }
 }

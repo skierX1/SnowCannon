@@ -53,6 +53,21 @@ namespace SnowCannon
             ShowMain();
         }
 
+        void Update()
+        {
+            // ESC leaves the game from the title screen too, mirroring the play scene.
+            if (UnityEngine.InputSystem.Keyboard.current != null &&
+                UnityEngine.InputSystem.Keyboard.current.escapeKey.wasPressedThisFrame)
+            {
+                GameFlow.Quit();
+                return;
+            }
+
+#if UNITY_EDITOR
+            SmokeUpdate();
+#endif
+        }
+
 #if UNITY_EDITOR
         int menuSmokeStep;
         bool warmedUp;
@@ -60,7 +75,7 @@ namespace SnowCannon
 
         // Editor-only smoke hook: when the marker file is present, grab the composited menu,
         // then open + grab the Sound submenu (proving the new UI renders), then hand off to play.
-        void Update()
+        void SmokeUpdate()
         {
             if (!System.IO.File.Exists("c:/tmp/sc_smoke_enabled")) return;
             if (!warmedUp) { warmedUp = true; ScreenGrab.WarmUp(); }
