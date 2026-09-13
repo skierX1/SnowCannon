@@ -241,10 +241,8 @@ namespace SnowCannon
             float x = Random.Range(-GameConfig.FieldHalfWidth + 1.5f,
                                    GameConfig.FieldHalfWidth - 1.5f);
 
-            var sm = Snowman.Spawn(size, speed);
+            var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 8f + (level - 1) * 4f));
             sm.transform.position = new Vector3(x, 0f, GameConfig.SpawnZ);
-            // Level 1 barely weaves; every further level adds more side-to-side dodge.
-            sm.WeaveAmplitude = Mathf.Min(3.2f, 0.35f + (level - 1) * 0.45f);
             active.Add(sm);
             totalSpawned++;
             if (smokeEnabled) SmokeLog("spawn@" + smokeElapsed.ToString("0.0") + " x=" + x.ToString("0.0"));

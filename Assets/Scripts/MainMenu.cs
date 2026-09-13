@@ -285,15 +285,24 @@ namespace SnowCannon
         Text AddToggleRow(RectTransform card, string name, string title, int row, Action onClick)
         {
             float top = -150f - row * 78f;
-            var label = Ui.AddText(card, name + "_t", title, 34, Color.white, TextAnchor.MiddleLeft);
-            Ui.Place(Ui.Rt(label.gameObject), new Vector2(0f, 1f), new Vector2(0f, 1f),
-                     new Vector2(40f, top), new Vector2(320f, 60f));
 
-            var value = Ui.AddText(card, name + "_v", "", 34, GameConfig.CannonYellow, TextAnchor.MiddleRight);
-            var b = Ui.AddButton(card, name + "_b", "", new Vector2(220f, 64f), 32,
-                                new Color(0.15f, 0.25f, 0.35f, 1f), onClick);
-            Ui.Place(Ui.Rt(b.gameObject), new Vector2(1f, 1f), new Vector2(1f, 1f),
-                     new Vector2(-40f, top), new Vector2(220f, 64f));
+            // The whole row is one wide button, so tapping the label OR the value both fire the
+            // action. Previously only a small box on the far right was clickable and the ON/OFF
+            // read-out was never positioned, so the row looked and felt inert.
+            var rowBtn = Ui.AddButton(card, name + "_b", "", new Vector2(540f, 64f), 32,
+                                      new Color(0.15f, 0.25f, 0.35f, 1f), onClick);
+            Ui.Place(Ui.Rt(rowBtn.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                     new Vector2(0f, top), new Vector2(540f, 64f));
+
+            var label = Ui.AddText(Ui.Rt(rowBtn.gameObject), name + "_t", title, 34,
+                                  Color.white, TextAnchor.MiddleLeft);
+            Ui.Place(Ui.Rt(label.gameObject), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                     new Vector2(24f, 0f), new Vector2(340f, 60f));
+
+            var value = Ui.AddText(Ui.Rt(rowBtn.gameObject), name + "_v", "", 34,
+                                  GameConfig.CannonYellow, TextAnchor.MiddleRight);
+            Ui.Place(Ui.Rt(value.gameObject), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                     new Vector2(-24f, 0f), new Vector2(150f, 60f));
             return value;
         }
 
@@ -316,7 +325,7 @@ namespace SnowCannon
 
             var card = Ui.NewRect("card", Ui.Rt(soundPanel));
             Ui.Place(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     Vector2.zero, new Vector2(620f, 460f));
+                     Vector2.zero, new Vector2(620f, 520f));
             Ui.AddPanel(card, "bg", new Color(0.06f, 0.13f, 0.21f, 0.96f), false);
 
             var head = Ui.AddText(card, "head", "SOUND", 52, GameConfig.CannonYellow, TextAnchor.MiddleCenter);

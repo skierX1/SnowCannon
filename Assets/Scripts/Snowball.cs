@@ -26,7 +26,11 @@ namespace SnowCannon
             sb.life = GameConfig.SnowballLifeTime;
 
             var r = go.GetComponent<MeshRenderer>();
-            r.material = Mat.Textured(TextureFactory.Snow(), GameConfig.SnowWhite);
+            r.material = Mat.Textured(TextureFactory.SnowballSnow(), GameConfig.SnowWhite);
+            // A lumpy, hand-packed shape instead of a perfect sphere; the collider stays a
+            // unit sphere so hit detection is unchanged.
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf != null) mf.sharedMesh = MeshFactory.LumpySnowball(Random.Range(0, 100000));
             // Unit sphere (local radius 0.5): scale so the world radius matches SnowballRadius.
             go.transform.localScale = Vector3.one * (GameConfig.SnowballRadius * 2f);
 

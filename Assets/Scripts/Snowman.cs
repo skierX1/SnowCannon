@@ -22,23 +22,24 @@ namespace SnowCannon
         public bool IsDying { get; private set; }
         public bool IsDone { get; private set; }
 
-        /// <summary>How far the snowman may drift sideways while marching (world units).
-        /// The game raises it with the level so higher levels weave harder.</summary>
-        public float WeaveAmplitude { get; set; }
-
-        /// <summary>Original spawn X; the weave oscillates about this line.</summary>
-        float baseX;
-
         /// <summary>World Y of the head centre, used to decide head vs body hits.</summary>
         public float HeadWorldY { get; private set; }
+
+        /// <summary>Every live snowman, so two of them can detect and bounce off each other
+        /// without the game having to hand the whole list to each Update.</summary>
+        static readonly List<Snowman> all = new List<Snowman>();
 
         Transform bottomBall;
         readonly List<Chunk> chunks = new List<Chunk>();
         float fadeTimer;
         float size = 1f;
         float swayPhase;
-        float weavePhase;
-        float weaveFreq = 1.6f;
+
+        // Travel heading, in degrees off straight-ahead (0 = straight at the camera, + = to the
+        // right). Chosen at random up to MaxAngle and reflected off the side walls and off other
+        // snowmen, so the march is a random diagonal that always stays inside the field.
+        float headingDeg;
+        float maxAngle = 30f;
 
         sealed class Chunk
         {
@@ -51,7 +52,7 @@ namespace SnowCannon
         }
 
         /// <summary>Builds a snowman and returns its root. The caller owns it.</summary>
-        public static Snowman Spawn(float size, float speed, int textureVariant = -1)
+        public static Snowman Spawn(float size, float speed, int textureVariant = -1, float maxAngleDeg = 30f)
         {
             var go = new GameObject("Snowman");
             var sm = go.AddComponent<Snowman>();
@@ -59,8 +60,11 @@ namespace SnowCannon
             sm.Speed = speed;
             // Each snowman picks its own snow look so the field never looks cloned.
             sm.textureVariant = textureVariant >= 0 ? textureVariant : Random.Range(0, 6);
-            sm.weaveFreq = Random.Range(1.1f, 2.3f);
+            // A random diagonal heading, up to maxAngleDeg off straight-ahead.
+            sm.maxAngle = Mathf.Clamp(maxAngleDeg, 0f, 30f);
+            sm.headingDeg = Random.Range(-sm.maxAngle, sm.maxAngle);
             sm.Build();
+            all.Add(sm);
             return sm;
         }
 
@@ -70,9 +74,13 @@ namespace SnowCannon
         {
             var snow = Mat.SnowMaterial(textureVariant);
             Register(snow);
+            // The rolling bottom ball gets its own dirtier skin: the scattered dirt clumps
+            // travel with the spin, so the ball's rotation is visible as it marches.
+            var snowDirty = Mat.SnowMaterialDirt(textureVariant);
+            Register(snowDirty);
 
             // The three stacked balls. The lowest one is the rolling wheel.
-            bottomBall = AddSphere("ball_bottom", snow, new Vector3(0, Yb, 0), Rb * 2f);
+            bottomBall = AddSphere("ball_bottom", snowDirty, new Vector3(0, Yb, 0), Rb * 2f);
             AddSphere("ball_middle", snow, new Vector3(0, Ym, 0), Rm * 2f);
             var head = AddSphere("ball_head", snow, new Vector3(0, Yt, 0), Rt * 2f);
 
@@ -82,7 +90,8 @@ namespace SnowCannon
             Register(carrot);
             var branch = Mat.Opaque(GameConfig.BranchBrown);
             Register(branch);
-            var pot = Mat.Opaque(GameConfig.PotMetal);
+            // Every snowman wears a randomly coloured bucket, so the field stays varied.
+            var pot = Mat.Opaque(GameConfig.PotColors[Random.Range(0, GameConfig.PotColors.Length)]);
             Register(pot);
 
             // Face points toward the camera, i.e. toward -Z.
@@ -210,38 +219,83 @@ namespace SnowCannon
                 return;
             }
 
-            // Advance toward the camera.
-            transform.Translate(Vector3.back * (Speed * Time.deltaTime), Space.World);
-            HeadWorldY = transform.position.y + Yt * size;
-
-            // A gentle left-to-right waddle while it marches.
-            swayPhase += Time.deltaTime * 3.4f;
-            float yaw = Mathf.Sin(swayPhase) * 7f;
-
-            // Side-to-side weave on top of the forward march; the game widens the amplitude
-            // with the level so higher levels are harder to lead with a straight shot.
-            float targetX = baseX;
-            if (WeaveAmplitude > 0.001f)
-            {
-                weavePhase += Time.deltaTime * weaveFreq;
-                float drift = Mathf.Sin(weavePhase) * WeaveAmplitude;
-                float limit = GameConfig.FieldHalfWidth - 1.2f;
-                targetX = Mathf.Clamp(baseX + drift, -limit, limit);
-            }
             var p = transform.position;
-            p.x = Mathf.MoveTowards(p.x, targetX, 6f * Time.deltaTime);
+
+            // March along the current heading: straight toward the camera, angled up to 30 deg
+            // left or right, so the path is a random diagonal that uses the whole field width.
+            float rad = headingDeg * (Mathf.PI / 180f);
+            Vector3 dir = new Vector3(Mathf.Sin(rad), 0f, -Mathf.Cos(rad));
+            p += dir * (Speed * Time.deltaTime);
+
+            // Bounce off the side walls so a snowman always stays inside the screen.
+            float limit = GameConfig.FieldHalfWidth - 0.6f * size;
+            if (p.x <= -limit) { p.x = -limit; headingDeg = -headingDeg; }
+            else if (p.x >= limit) { p.x = limit; headingDeg = -headingDeg; }
+
             transform.position = p;
-            // Lean a touch into the drift so the weave reads as movement, not teleporting.
-            float lean = Mathf.Clamp((targetX - p.x) * 4f, -10f, 10f);
-            transform.rotation = Quaternion.Euler(0f, yaw + lean, 0f);
+            HeadWorldY = p.y + Yt * size;
+
+            // Two snowmen that meet on the way down shove apart and both bounce off, so they
+            // never end up overlapping.
+            ResolveCollisions();
+
+            // A gentle waddle, plus a slight lean into the direction of travel.
+            swayPhase += Time.deltaTime * 3.4f;
+            float yaw = Mathf.Sin(swayPhase) * 7f - headingDeg * 0.6f;
+            transform.rotation = Quaternion.Euler(0f, yaw, 0f);
 
             // The bottom ball rolls: omega = v / r, about the axis perpendicular to travel.
             if (bottomBall != null)
             {
-                // omega = v / r, converted to degrees per frame (Mathf has no Rad2Deg in 6.6).
-                float omegaDeg = (Speed / (Rb * size)) * Time.deltaTime * (180f / Mathf.PI);
-                bottomBall.Rotate(Vector3.right, omegaDeg, Space.World);
+                // For a ball rolling on the ground (up = +Y) toward `dir`, the no-slip spin axis
+                // is up x dir = (dir.z, 0, -dir.x); spinning a positive angle about that axis
+                // carries the top of the ball forward, i.e. the ball rolls the way it travels.
+                Vector3 rollAxis = new Vector3(dir.z, 0f, -dir.x);
+                if (rollAxis.sqrMagnitude > 0.0001f)
+                {
+                    // omega = v / r, converted to degrees per frame (Mathf has no Rad2Deg in 6.6).
+                    float omegaDeg = (Speed / (Rb * size)) * Time.deltaTime * (180f / Mathf.PI);
+                    bottomBall.Rotate(rollAxis.normalized, omegaDeg, Space.World);
+                }
             }
+        }
+
+        /// <summary>Separates this snowman from any other it has driven into and reflects both
+        /// headings, so colliding snowmen bounce out instead of overlapping.</summary>
+        void ResolveCollisions()
+        {
+            float rA = Rb * size;
+            var pa = transform.position;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var o = all[i];
+                if (o == null || o == this || o.IsDying || o.IsDone) continue;
+
+                var pb = o.transform.position;
+                float dx = pa.x - pb.x, dz = pa.z - pb.z;
+                float dist = Mathf.Sqrt(dx * dx + dz * dz);
+                float minDist = rA + Rb * o.size;
+                if (dist >= minDist) continue;
+
+                // Perfectly stacked: nudge apart along a random sideways axis.
+                if (dist < 0.0001f)
+                {
+                    dx = Random.Range(-1f, 1f); dz = Random.Range(-1f, 1f);
+                    dist = Mathf.Max(0.0001f, Mathf.Sqrt(dx * dx + dz * dz));
+                }
+
+                float nx = dx / dist, nz = dz / dist;
+                float push = (minDist - dist) * 0.5f;
+                pa.x += nx * push; pa.z += nz * push;
+                var ob = o.transform.position;
+                ob.x -= nx * push; ob.z -= nz * push;
+                o.transform.position = ob;
+
+                // Both turn around and head off in their own new diagonal.
+                headingDeg = -headingDeg;
+                o.headingDeg = -o.headingDeg;
+            }
+            transform.position = pa;
         }
 
         /// <summary>Called by the game when a snowball connects. Head hits score more.</summary>
@@ -307,6 +361,7 @@ namespace SnowCannon
 
         void OnDestroy()
         {
+            all.Remove(this);
             foreach (var c in chunks)
             {
                 if (c.material != null) Destroy(c.material);

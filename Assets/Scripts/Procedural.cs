@@ -166,6 +166,49 @@ namespace SnowCannon
             mesh.RecalculateBounds();
             return mesh;
         }
+
+        /// <summary>A hand-thrown snowball: a sphere whose surface is pushed in and out by
+        /// seeded value noise, so it reads as a lumpy, hunched ball of packed snow rather than
+        /// a perfect sphere. Unit diameter, centred on the origin.</summary>
+        public static Mesh LumpySnowball(int seed)
+        {
+            const int rings = 14, segments = 20;
+            var verts = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            const float f = 2.3f;
+            for (int r = 0; r <= rings; r++)
+            {
+                float phi = Mathf.PI * r / rings;
+                float sp = Mathf.Sin(phi), cp = Mathf.Cos(phi);
+                for (int s = 0; s <= segments; s++)
+                {
+                    float theta = Mathf.PI * 2f * s / segments;
+                    var d = new Vector3(sp * Mathf.Cos(theta), cp, sp * Mathf.Sin(theta));
+                    float n = Mathf.PerlinNoise(d.x * f + d.y * 0.37f + seed * 7.13f,
+                                               d.z * f + d.y * 0.61f + seed * 3.71f);
+                    verts.Add(d * (0.5f * (1f + (n - 0.5f) * 0.34f)));
+                    uvs.Add(new Vector2((float)s / segments, (float)r / rings));
+                }
+            }
+            int row = segments + 1;
+            for (int r = 0; r < rings; r++)
+            {
+                for (int s = 0; s < segments; s++)
+                {
+                    int a = r * row + s, b = a + 1, c = a + row, e = c + 1;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+            var mesh = new Mesh { name = "lumpy_snowball_" + seed };
+            mesh.SetVertices(verts);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0, false);
+            mesh.RecalculateBounds();
+            mesh.RecalculateNormals();
+            return mesh;
+        }
     }
 
     /// <summary>Run-time generated textures. Keeps the project free of binary assets.</summary>
@@ -223,6 +266,102 @@ namespace SnowCannon
                                               (byte)Mathf.Min(255, 244 + blue / 4f), 255);
             }
 
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
+            return tex;
+        }
+
+        /// <summary>The rolling bottom ball's snow: the same speckled base as Snow(), plus a
+        /// scatter of brown dirt clumps. The ball spins as it marches, so the dirt travels with
+        /// it and the rotation becomes obvious to the eye.</summary>
+        public static Texture2D SnowWithDirt(int variant)
+        {
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "snow_dirt" + variant };
+            float ox = variant * 37.31f, oy = variant * 11.77f;
+            var px = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float n = Mathf.PerlinNoise(x * 0.11f + ox, y * 0.11f + oy);
+                    byte baseV = (byte)Mathf.Clamp(232 + n * 14f, 196f, 255f);
+                    px[y * size + x] = new Color32(
+                        (byte)Mathf.Clamp(baseV - 6f, 0f, 255f),
+                        (byte)Mathf.Clamp(baseV - 1f, 0f, 255f),
+                        baseV, 255);
+                }
+            }
+            for (int i = 0; i < 2400; i++)
+            {
+                int x = Random.Range(0, size), y = Random.Range(0, size);
+                byte v = (byte)Random.Range(248, 256);
+                px[y * size + x] = new Color32(v, v, v, 255);
+            }
+            // A little random dirt: small brown clumps so the rolling ball's spin is visible.
+            int clumps = 26 + (variant % 4) * 6;
+            for (int c = 0; c < clumps; c++)
+            {
+                int cx = Random.Range(0, size), cy = Random.Range(0, size);
+                int r = Random.Range(2, 5);
+                float shade = Random.Range(70f, 130f);
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (dx * dx + dy * dy > r * r) continue;
+                        int x = (cx + dx + size) % size, y = (cy + dy + size) % size;
+                        float jitter = Random.Range(0.7f, 1.15f);
+                        px[y * size + x] = new Color32(
+                            (byte)Mathf.Clamp(shade * 1.25f * jitter, 0f, 255f),
+                            (byte)Mathf.Clamp(shade * 0.85f * jitter, 0f, 255f),
+                            (byte)Mathf.Clamp(shade * 0.55f * jitter, 0f, 255f), 255);
+                    }
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
+            return tex;
+        }
+
+        /// <summary>A chunkier, sparklier snow for the thrown snowball: a bright base with
+        /// dense grain, visible clumps and blue-ish crevice shading, so the bullet reads as
+        /// packed snow rather than a flat white ball.</summary>
+        public static Texture2D SnowballSnow()
+        {
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "snowball_tex" };
+            var px = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float n = Mathf.PerlinNoise(x * 0.09f, y * 0.09f);
+                    float clump = Mathf.PerlinNoise(x * 0.22f + 40f, y * 0.22f + 40f);
+                    byte b = (byte)Mathf.Clamp(226f + n * 20f + clump * 14f, 190f, 255f);
+                    px[y * size + x] = new Color32(
+                        (byte)Mathf.Clamp(b - 4f, 0f, 255f),
+                        (byte)Mathf.Clamp(b - 1f, 0f, 255f),
+                        b, 255);
+                }
+            }
+            for (int i = 0; i < 5200; i++)
+            {
+                int x = Random.Range(0, size), y = Random.Range(0, size);
+                byte v = (byte)Random.Range(250, 256);
+                px[y * size + x] = new Color32(v, v, v, 255);
+            }
+            for (int i = 0; i < 1600; i++)
+            {
+                int x = Random.Range(0, size), y = Random.Range(0, size);
+                px[y * size + x] = new Color32(206, 220, 240, 255);
+            }
             tex.SetPixels32(px);
             tex.Apply(false, true);
             tex.wrapMode = TextureWrapMode.Repeat;
@@ -420,6 +559,18 @@ namespace SnowCannon
             var m = Textured(tex, tint);
             m.SetFloat("_Smoothness", 0.15f);
             m.name = "mat_snow" + variant;
+            return m;
+        }
+
+        /// <summary>The rolling bottom ball's material: speckled snow with scattered dirt so
+        /// its rotation reads to the eye while the snowman marches.</summary>
+        public static Material SnowMaterialDirt(int variant = 0)
+        {
+            var tex = TextureFactory.SnowWithDirt(variant);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            var m = Textured(tex, GameConfig.SnowWhite);
+            m.SetFloat("_Smoothness", 0.15f);
+            m.name = "mat_snow_dirt" + variant;
             return m;
         }
 

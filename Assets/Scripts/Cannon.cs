@@ -325,7 +325,8 @@ namespace SnowCannon
                 if (fanSpinDelay > 0f) fanSpinDelay -= Time.deltaTime;
                 else
                 {
-                    if (fanSpinSpeed < 300f) fanSpinSpeed += 200f * Time.deltaTime;
+                    // Spins three times faster than before during play.
+                    if (fanSpinSpeed < 900f) fanSpinSpeed += 600f * Time.deltaTime;
                     fanBlades.Rotate(Vector3.forward, fanSpinSpeed * Time.deltaTime, Space.Self);
                 }
             }

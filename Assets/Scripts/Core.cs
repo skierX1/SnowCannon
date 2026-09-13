@@ -22,7 +22,7 @@ namespace SnowCannon
         public const float CannonSpeed = 8.5f;
         public const float FireCooldown = 0.32f;
         public const float SnowballSpeed = 68f;
-        public const float SnowballRadius = 0.55f;
+        public const float SnowballRadius = 0.95f;
         public const float SnowballLifeTime = 3.0f;
         public const float SnowballGravity = 40f;
 
@@ -41,15 +41,14 @@ namespace SnowCannon
         public const int FirstLevelDuration = 60;
         public const int SecondLevelDuration = 90;
         public const int LevelDurationStep = 10;
-        public const float FirstSpawnInterval = 5f;
+        public const float FirstSpawnInterval = 2f;
         public const float SpawnIntervalFactor = 0.8f;
         public const float MinSpawnInterval = 0.6f;
 
-        /// <summary>Level 1 = 60 s, level 2 = 90 s, then +10 s per level.</summary>
+        /// <summary>Level 1 = 60 s, then +1 s for every level after it (61, 62, 63, ...).</summary>
         public static int LevelDuration(int level)
         {
-            if (level <= 1) return FirstLevelDuration;
-            return SecondLevelDuration + (level - 2) * LevelDurationStep;
+            return FirstLevelDuration + Mathf.Max(0, level - 1);
         }
 
         /// <summary>Level 1 = 5 s, every next level is 80 % of the previous one.</summary>
@@ -68,6 +67,18 @@ namespace SnowCannon
         public static readonly Color CarrotOrange = new Color(0.95f, 0.45f, 0.08f, 1f);
         public static readonly Color BranchBrown = new Color(0.35f, 0.22f, 0.12f, 1f);
         public static readonly Color PotMetal = new Color(0.30f, 0.28f, 0.30f, 1f);
+
+        /// <summary>The bucket-hat colours a snowman may wear; one is picked at random per snowman.</summary>
+        public static readonly Color[] PotColors =
+        {
+            new Color(0.30f, 0.28f, 0.30f, 1f), // gunmetal
+            new Color(0.78f, 0.18f, 0.14f, 1f), // red
+            new Color(0.16f, 0.36f, 0.72f, 1f), // blue
+            new Color(0.18f, 0.55f, 0.28f, 1f), // green
+            new Color(0.55f, 0.36f, 0.16f, 1f), // copper
+            new Color(0.85f, 0.66f, 0.12f, 1f), // brass
+            new Color(0.45f, 0.47f, 0.52f, 1f), // steel
+        };
         public static readonly Color SkyBlue = new Color(0.62f, 0.79f, 0.93f, 1f);
         public static readonly Color GroundSnow = new Color(0.92f, 0.95f, 1.00f, 1f);
     }
