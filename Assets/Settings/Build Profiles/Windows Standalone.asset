@@ -10,14 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 15003, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: Universal Windows Platform
+  m_Name: Windows Standalone
   m_EditorClassIdentifier: UnityEditor.dll::UnityEditor.Build.Profile.BuildProfile
   m_AssetVersion: 2
-  m_BuildTarget: 21
-  m_Subtarget: 0
-  m_PlatformId: 32e92b6f4db44fadb869cafb8184d021
+  m_BuildTarget: 19
+  m_Subtarget: 2
+  m_PlatformId: 4e3c793746204150860bf175a9a41a05
   m_PlatformBuildProfile:
-    rid: 2375892104111456256
+    rid: 2375892109813088256
   m_ActivePlatformGuid: 
   m_AdditionalPlatformBuildSettings: []
   m_OverrideGlobalSceneList: 0
@@ -30,10 +30,10 @@ MonoBehaviour:
   references:
     version: 2
     RefIds:
-    - rid: 2375892104111456256
-      type: {class: UWPPlatformSettings, ns: UnityEditor.UWP, asm: UnityEditor.UWP.Extensions}
+    - rid: 2375892109813088256
+      type: {class: WindowsPlatformSettings, ns: UnityEditor.WindowsStandalone, asm: UnityEditor.WindowsStandalone.Extensions}
       data:
-        m_Development: 1
+        m_Development: 0
         m_ConnectProfiler: 0
         m_BuildWithDeepProfilingSupport: 0
         m_BuildWithCodeCoverage: 0
@@ -43,19 +43,14 @@ MonoBehaviour:
         m_ExplicitNullChecks: 0
         m_ExplicitDivideByZeroChecks: 0
         m_ExplicitArrayBoundsChecks: 0
-        m_CompressionType: 0
+        m_CompressionType: -1
         m_InstallInBuildFolder: 0
         m_InsightsSettingsContainer:
           m_BuildProfileEngineDiagnosticsState: 2
         m_AdaptivePerformanceEnabled: 0
-        m_CopyRefences: 0
+        m_WindowsBuildAndRunDeployTarget: 0
+        m_Architecture: 0
+        m_CreateSolution: 0
         m_CopyPDBFiles: 0
-        m_BuildConfiguration: 1
-        m_WsaArchitecture: 
-        m_WsaUWPVisualStudioVersion: 
-        m_WsaUWPSDK: 
-        m_WsaMinUWPSDK: 10.0.19041.0
-        m_WsaUWPBuildType: 1
-        m_WsaBuildAndRunDeployTarget: 0
         m_WindowsDevicePortalAddress: 
         m_WindowsDevicePortalUsername: 

@@ -73,11 +73,36 @@ namespace SnowCannon
         /// </summary>
         public Vector2 ReadMove()
         {
+            // Primary path: the action map. If its per-frame processing ever fails to
+            // deliver (a stale map, a focus quirk in the editor), the direct device read
+            // below still drives the cannon, so input can never go fully dead.
             var keys = new Vector2(
                 (moveRight.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveLeft.ReadValue<float>() > 0.5f ? 1f : 0f),
                 (moveUp.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveDown.ReadValue<float>() > 0.5f ? 1f : 0f));
 
-            var mouse = lookDelta.ReadValue<Vector2>() * Settings.MouseSensitivity * 0.06f;
+            // Direct keyboard fallback, OR-ed in so a broken action map cannot zero it out.
+            var kb = Keyboard.current;
+            if (kb != null)
+            {
+                float dx = (kb.dKey.isPressed || kb.rightArrowKey.isPressed ? 1f : 0f)
+                         - (kb.aKey.isPressed || kb.leftArrowKey.isPressed ? 1f : 0f);
+                float dy = (kb.wKey.isPressed || kb.upArrowKey.isPressed ? 1f : 0f)
+                         - (kb.sKey.isPressed || kb.downArrowKey.isPressed ? 1f : 0f);
+                if (Mathf.Abs(dx) > Mathf.Abs(keys.x)) keys.x = dx;
+                if (Mathf.Abs(dy) > Mathf.Abs(keys.y)) keys.y = dy;
+            }
+
+            var mouse = lookDelta.ReadValue<Vector2>();
+            // Direct mouse fallback: the action map's delta control can lag or stall in
+            // the editor while the raw device delta keeps flowing.
+            var md = Mouse.current;
+            if (md != null)
+            {
+                var rawDelta = md.delta.ReadValue();
+                if (mouse.sqrMagnitude < 0.0001f && rawDelta.sqrMagnitude > 0.0001f)
+                    mouse = rawDelta;
+            }
+            mouse *= Settings.MouseSensitivity * 0.06f;
             if (Settings.InvertY) mouse.y = -mouse.y;
             // A resting hand must never make the cannon creep.
             if (mouse.sqrMagnitude < 0.0004f) mouse = Vector2.zero;
@@ -97,13 +122,22 @@ namespace SnowCannon
         public bool IsFireHeld()
         {
             if (pointerBlocked) return false;
-            return fire.IsPressed() || touchFireHeld;
+            if (touchFireHeld) return true;
+            if (fire.IsPressed()) return true;
+            // Direct fallback: space or left mouse button, independent of the action map.
+            var kb = Keyboard.current;
+            if (kb != null && kb.spaceKey.isPressed) return true;
+            var md = Mouse.current;
+            if (md != null && md.leftButton.isPressed) return true;
+            return false;
         }
 
         /// <summary>One-shot ESC press, used to stop the game.</summary>
         public bool IsEscapePressed()
         {
-            return escape != null && escape.WasPressedThisFrame();
+            if (escape != null && escape.WasPressedThisFrame()) return true;
+            var kb = Keyboard.current;
+            return kb != null && kb.escapeKey.wasPressedThisFrame;
         }
 
         public void Enable() { if (map != null && !map.enabled) map.Enable(); }

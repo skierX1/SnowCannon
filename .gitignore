@@ -9,7 +9,11 @@
 /[Mm]emory[Cc]aptures/
 /Recordings/
 *.unitypackage.bak
-
+# -- Local player build output (scripted + Build Settings) --
+/[Bb]uildWinUni/
+/[Ss]nowCannon[Bb]uild/
+Assets/WSATestCertificate.pfx
+Assets/WSATestCertificate.pfx.meta
 # Never commit Unity asset meta / library caches that are regenerated
 *.tmp
 *.unitypackage
