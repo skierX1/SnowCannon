@@ -1,0 +1,35 @@
+# -- Unity --
+/[Ll]ibrary/
+/[Bb]uilds/
+/[Bb]uild/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emory[Cc]aptures/
+/Recordings/
+*.unitypackage.bak
+
+# Never commit Unity asset meta / library caches that are regenerated
+*.tmp
+*.unitypackage
+
+# -- Visual Studio / Rider / VS Code generated --
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+ExportedObj/
+*.vsconfig
+
+# -- OS --
+.DS_Store
+Thumbs.db
+GhiThumbs.db
+*.swp
