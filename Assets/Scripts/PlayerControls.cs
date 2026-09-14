@@ -73,48 +73,47 @@ namespace SnowCannon
         /// </summary>
         public Vector2 ReadMove()
         {
-            // Primary path: the action map. If its per-frame processing ever fails to
-            // deliver (a stale map, a focus quirk in the editor), the direct device read
-            // below still drives the cannon, so input can never go fully dead.
-            var keys = new Vector2(
-                (moveRight.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveLeft.ReadValue<float>() > 0.5f ? 1f : 0f),
-                (moveUp.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveDown.ReadValue<float>() > 0.5f ? 1f : 0f));
-
-            // Direct keyboard fallback, OR-ed in so a broken action map cannot zero it out.
+            // Keyboard: read the RAW device Button controls, which self-zero the instant a key
+            // is released. The action map's Value actions can retain their last value after a
+            // release (a stale map, a focus quirk), which would pin the aim — so the device is
+            // authoritative and the action map is only a fallback when no device is present.
             var kb = Keyboard.current;
+            Vector2 keys;
             if (kb != null)
             {
                 float dx = (kb.dKey.isPressed || kb.rightArrowKey.isPressed ? 1f : 0f)
                          - (kb.aKey.isPressed || kb.leftArrowKey.isPressed ? 1f : 0f);
                 float dy = (kb.wKey.isPressed || kb.upArrowKey.isPressed ? 1f : 0f)
                          - (kb.sKey.isPressed || kb.downArrowKey.isPressed ? 1f : 0f);
-                if (Mathf.Abs(dx) > Mathf.Abs(keys.x)) keys.x = dx;
-                if (Mathf.Abs(dy) > Mathf.Abs(keys.y)) keys.y = dy;
+                keys = new Vector2(dx, dy);
+            }
+            else
+            {
+                keys = new Vector2(
+                    (moveRight.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveLeft.ReadValue<float>() > 0.5f ? 1f : 0f),
+                    (moveUp.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveDown.ReadValue<float>() > 0.5f ? 1f : 0f));
             }
 
-            var mouse = lookDelta.ReadValue<Vector2>();
-            // Direct mouse fallback: the action map's delta control can lag or stall in
-            // the editor while the raw device delta keeps flowing.
+            // Mouse look: read the RAW per-frame device delta, which self-zeroes when the
+            // pointer is still. The action map's <Mouse>/delta is a Value action and RETAINS
+            // the last movement after the mouse stops, which would pin the aim and (via the
+            // old "mouse wins" rule) suppress the keyboard — so the device is authoritative.
+            var mouse = Vector2.zero;
             var md = Mouse.current;
             if (md != null)
-            {
-                var rawDelta = md.delta.ReadValue();
-                if (mouse.sqrMagnitude < 0.0001f && rawDelta.sqrMagnitude > 0.0001f)
-                    mouse = rawDelta;
-            }
+                mouse = md.delta.ReadValue();
+            else
+                mouse = lookDelta.ReadValue<Vector2>();
             mouse *= Settings.MouseSensitivity * 0.06f;
             if (Settings.InvertY) mouse.y = -mouse.y;
             // A resting hand must never make the cannon creep.
             if (mouse.sqrMagnitude < 0.0004f) mouse = Vector2.zero;
             mouse = Vector2.ClampMagnitude(mouse, 1f);
 
-            var move = keys;
-            if (touchMove.sqrMagnitude > 0.0004f)
-            {
-                if (move.sqrMagnitude < 0.0001f) move = touchMove;
-                else move = Vector2.ClampMagnitude(move + touchMove, 1f);
-            }
-            if (mouse.sqrMagnitude > move.sqrMagnitude) move = mouse;
+            // Combine additively so a stuck or active mouse can never mask the keyboard and
+            // vice-versa; the clamp keeps the total magnitude sane.
+            var move = keys + mouse;
+            if (touchMove.sqrMagnitude > 0.0004f) move += touchMove;
 
             return Vector2.ClampMagnitude(move, 1f);
         }
