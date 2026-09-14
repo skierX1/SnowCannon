@@ -292,6 +292,10 @@ namespace SnowCannon
             }
             if (gameOverPanel != null) gameOverPanel.SetActive(true);
             gameOverCooldown = 0.5f;
+
+            // Start the fan's spin-down on the same frame the card becomes visible, so the
+            // machinery visibly loses power while the player reads the score.
+            if (cannon != null) cannon.StopFan();
         }
 
         // ---- public hooks used by Cannon and Snowball -------------------------

@@ -241,7 +241,7 @@ namespace SnowCannon
 
             // A gentle waddle, plus a slight lean into the direction of travel.
             swayPhase += Time.deltaTime * 3.4f;
-            float yaw = Mathf.Sin(swayPhase) * 7f - headingDeg * 0.6f;
+            float yaw = Mathf.Sin(swayPhase) * 9.1f - headingDeg * 0.6f;
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
 
             // The bottom ball rolls: omega = v / r, about the axis perpendicular to travel.

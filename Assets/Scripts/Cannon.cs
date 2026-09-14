@@ -25,6 +25,12 @@ namespace SnowCannon
         float cooldown;
         float fanSpinDelay = 1.2f;
         float fanSpinSpeed;
+        // Fan coast-down after the run ends: -1 means "still running", otherwise it is the
+        // remaining seconds of the spin-down and the speed is interpolated to zero from the
+        // speed captured at the moment the game-over card went up.
+        const float FanSpinDownTime = 10f;
+        float fanSpinDownTimer = -1f;
+        float fanSpinDownFrom;
         SnowCannonGame game;
 
         // Barrel aim, in degrees. yaw sweeps left/right, pitch is the elevation above the
@@ -319,10 +325,27 @@ namespace SnowCannon
             if (beaconGlow != null)
                 beaconGlow.transform.localScale = Vector3.one * (0.3f * (0.75f + 0.45f * pulse));
 
-            // The back fan is steady during the wind-up, then spins up to full speed.
+            // The back fan is steady during the wind-up, then spins up to full speed. Once the
+            // run is over it coasts down to a standstill over FanSpinDownTime instead of
+            // whirling behind the game-over card.
             if (fanBlades != null)
             {
-                if (fanSpinDelay > 0f) fanSpinDelay -= Time.deltaTime;
+                if (fanSpinDownTimer >= 0f)
+                {
+                    fanSpinDownTimer -= Time.deltaTime;
+                    float remaining = Mathf.Clamp01(fanSpinDownTimer / FanSpinDownTime);
+                    fanSpinSpeed = fanSpinDownFrom * remaining;
+                    if (fanSpinDownTimer <= 0f)
+                    {
+                        fanSpinSpeed = 0f;
+                        fanSpinDownTimer = -1f;
+                    }
+                    fanBlades.Rotate(Vector3.forward, fanSpinSpeed * Time.deltaTime, Space.Self);
+                }
+                else if (fanSpinDelay > 0f)
+                {
+                    fanSpinDelay -= Time.deltaTime;
+                }
                 else
                 {
                     // Spins three times faster than before during play.
@@ -341,6 +364,16 @@ namespace SnowCannon
                 cooldown = GameConfig.FireCooldown;
                 Fire();
             }
+        }
+
+        /// <summary>Called when the game-over card is shown: the fan stops driving and
+        /// decelerates smoothly to a standstill over FanSpinDownTime, like real machinery
+        /// losing power. Idempotent, so a repeated call cannot restart the countdown.</summary>
+        public void StopFan()
+        {
+            if (fanSpinDownTimer >= 0f) return;
+            fanSpinDownFrom = fanSpinSpeed;
+            fanSpinDownTimer = FanSpinDownTime;
         }
 
         void UpdateAim()

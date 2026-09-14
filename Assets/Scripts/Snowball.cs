@@ -13,6 +13,12 @@ namespace SnowCannon
         bool dead;
         SnowCannonGame game;
 
+        // Random tumble: each snowball gets its own spin axis and rate at launch so the
+        // speckled surface catches the light differently and the shot reads as a real packed
+        // snowball rather than a silently sliding sphere.
+        Vector3 spinAxis;
+        float spinSpeed;
+
         public static Snowball Fire(Vector3 origin, Vector3 direction, SnowCannonGame owner)
         {
             // A primitive sphere ships with a mesh + sphere collider already attached, so we
@@ -24,6 +30,11 @@ namespace SnowCannon
             sb.game = owner;
             sb.velocity = direction.normalized * GameConfig.SnowballSpeed;
             sb.life = GameConfig.SnowballLifeTime;
+
+            // onUnitSphere is already normalised, so no extra divide; the rate is randomised
+            // per shot so a volley never tumbles in lockstep.
+            sb.spinAxis = Random.onUnitSphere;
+            sb.spinSpeed = Random.Range(180f, 540f);
 
             var r = go.GetComponent<MeshRenderer>();
             r.material = Mat.Textured(TextureFactory.SnowballSnow(), GameConfig.SnowWhite);
@@ -78,6 +89,11 @@ namespace SnowCannon
             }
 
             transform.position += move;
+
+            // Tumble about the launch-time random axis. Rotation is independent of the
+            // position integration above, and the collider is a sphere, so the spin never
+            // affects the trajectory or hit detection.
+            if (spinSpeed > 0f) transform.Rotate(spinAxis, spinSpeed * Time.deltaTime, Space.World);
 
             // Out of the play field entirely, or dropped onto the snow.
             var p = transform.position;

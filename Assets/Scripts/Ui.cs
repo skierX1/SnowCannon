@@ -40,22 +40,24 @@ namespace SnowCannon
 
         static Font LoadFont()
         {
-            // 1) Built-in legacy font. Present in the editor, but often stripped from a player
-            //    build (the "LegacyRuntime could not be loaded" note), so treat it as best-effort.
-            try
-            {
-                var f = Resources.GetBuiltinResource(typeof(Font), "LegacyRuntime") as Font;
-                if (f != null) return f;
-            }
-            catch { }
-
-            // 2) A dynamic font from a face guaranteed to exist on the target OS. This is the
-            //    reliable path in a build (the built-in legacy face is stripped), so it covers
-            //    every platform; the broad name list lets the OS pick the first installed face.
+            // 1) A dynamic font from a face guaranteed to exist on the target OS. This is the
+            //    PRIMARY path because it works identically in the editor and in a player build,
+            //    and it never logs. The broad name list lets the OS pick the first installed face.
             try
             {
                 var f = Font.CreateDynamicFontFromOSFont(
                     new[] { "Arial", "Segoe UI", "Segoe UI Variable Text VF", "Tahoma", "Verdana", "Microsoft Sans Serif" }, 16);
+                if (f != null) return f;
+            }
+            catch { }
+
+            // 2) Built-in legacy face, only as a last resort. In 6.6 this is stripped from the
+            //    player build AND fails to resolve in the editor, and it LOGS an error instead of
+            //    returning null quietly, so it must not be attempted first -- a try/catch cannot
+            //    suppress that log because the API does not throw.
+            try
+            {
+                var f = Resources.GetBuiltinResource(typeof(Font), "LegacyRuntime") as Font;
                 if (f != null) return f;
             }
             catch { }
