@@ -73,26 +73,26 @@ namespace SnowCannon
         /// </summary>
         public Vector2 ReadMove()
         {
-            // Keyboard: read the RAW device Button controls, which self-zero the instant a key
-            // is released. The action map's Value actions can retain their last value after a
-            // release (a stale map, a focus quirk), which would pin the aim — so the device is
-            // authoritative and the action map is only a fallback when no device is present.
+            // Movement is read the SAME way fire is (see IsFireHeld): via the action map's
+            // IsPressed(), which is the mechanism proven to work for the fire button. The
+            // Value-style ReadValue<float>() returns 0 for these button-bound actions, which
+            // is why movement was dead while fire worked. Raw device reads are OR-ed in as a
+            // second source so a stalled action map can never fully mute the keyboard.
+            float dx = 0f, dy = 0f;
+            if (moveRight.IsPressed()) dx += 1f;
+            if (moveLeft.IsPressed()) dx -= 1f;
+            if (moveUp.IsPressed()) dy += 1f;
+            if (moveDown.IsPressed()) dy -= 1f;
+
             var kb = Keyboard.current;
-            Vector2 keys;
             if (kb != null)
             {
-                float dx = (kb.dKey.isPressed || kb.rightArrowKey.isPressed ? 1f : 0f)
-                         - (kb.aKey.isPressed || kb.leftArrowKey.isPressed ? 1f : 0f);
-                float dy = (kb.wKey.isPressed || kb.upArrowKey.isPressed ? 1f : 0f)
-                         - (kb.sKey.isPressed || kb.downArrowKey.isPressed ? 1f : 0f);
-                keys = new Vector2(dx, dy);
+                if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) dx = Mathf.Max(dx, 1f);
+                if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) dx = Mathf.Min(dx, -1f);
+                if (kb.wKey.isPressed || kb.upArrowKey.isPressed) dy = Mathf.Max(dy, 1f);
+                if (kb.sKey.isPressed || kb.downArrowKey.isPressed) dy = Mathf.Min(dy, -1f);
             }
-            else
-            {
-                keys = new Vector2(
-                    (moveRight.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveLeft.ReadValue<float>() > 0.5f ? 1f : 0f),
-                    (moveUp.ReadValue<float>() > 0.5f ? 1f : 0f) - (moveDown.ReadValue<float>() > 0.5f ? 1f : 0f));
-            }
+            var keys = new Vector2(Mathf.Clamp(dx, -1f, 1f), Mathf.Clamp(dy, -1f, 1f));
 
             // Mouse look: read the RAW per-frame device delta, which self-zeroes when the
             // pointer is still. The action map's <Mouse>/delta is a Value action and RETAINS
