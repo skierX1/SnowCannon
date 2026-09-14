@@ -42,6 +42,11 @@ namespace SnowCannon
         int totalSpawned;
         int snowballsFired;
 
+        // Round-robin lane counter so spawns are dealt out evenly across the field width
+        // instead of leaving the horizontal spread to chance (which clumps them centrally).
+        int spawnLane;
+        const int SpawnLanes = 7;
+
         bool smokeEnabled;
         float smokeElapsed;
         int smokeFrame;
@@ -237,11 +242,24 @@ namespace SnowCannon
             float size = Random.Range(GameConfig.SnowmanMinScale, GameConfig.SnowmanMaxScale);
             float speed = Random.Range(GameConfig.SnowmanMinSpeed, GameConfig.SnowmanMaxSpeed)
                           * (1f + (level - 1) * 0.20f);
-            float x = Random.Range(-GameConfig.FieldHalfWidth + 1.5f,
-                                   GameConfig.FieldHalfWidth - 1.5f);
 
-            var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 8f + (level - 1) * 4f));
-            sm.transform.position = new Vector3(x, 0f, GameConfig.SpawnZ);
+            // Deal spawns out across the field in round-robin lanes (with a little jitter inside
+            // each lane) so the wave is spread over the whole width instead of clumping in the
+            // middle the way pure chance does.
+            int lane = spawnLane % SpawnLanes;
+            spawnLane++;
+            float usable = GameConfig.FieldHalfWidth - 1.5f;
+            float laneW = (usable * 2f) / SpawnLanes;
+            float x = -usable + laneW * (lane + 0.5f) + Random.Range(-laneW * 0.32f, laneW * 0.32f);
+            x = Mathf.Clamp(x, -usable, usable);
+
+            // A small depth stagger so the far wave fans across the screen instead of collapsing
+            // into one straight line (which perspective squeezes toward the centre).
+            float z = GameConfig.SpawnZ - Random.Range(0f, 3.5f);
+
+            // A healthy base diagonal so they never look like they only march straight down.
+            var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 16f + (level - 1) * 4f));
+            sm.transform.position = new Vector3(x, 0f, z);
             active.Add(sm);
             totalSpawned++;
 #if UNITY_EDITOR

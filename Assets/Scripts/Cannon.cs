@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SnowCannon
@@ -31,6 +32,21 @@ namespace SnowCannon
         const float FanSpinDownTime = 10f;
         float fanSpinDownTimer = -1f;
         float fanSpinDownFrom;
+
+        // Fire "squash": the oversized snowball forcing its way down the narrow bore. The tube
+        // walls balloon outward in a bulge that travels from the back of the barrel to the
+        // muzzle (a fat ball squeezing through a tight pipe), and the whole tube dips down and
+        // settles. Driven by `squash` (1 -> 0 over SquashTime).
+        const float SquashTime = 0.22f;
+        const float BulgeAmp = 0.34f;
+        const float BulgeWidth = 0.55f;
+        const float BulgeStartZ = -1.3f;
+        const float BulgeEndZ = 1.25f;
+        const float RecoilMax = 7f;
+        float squash;
+        float recoilKick;
+        readonly List<BulgeElem> bulgeElems = new List<BulgeElem>();
+        bool bulgeActive;
         SnowCannonGame game;
 
         // Barrel aim, in degrees. yaw sweeps left/right, pitch is the elevation above the
@@ -76,35 +92,50 @@ namespace SnowCannon
             // The cannon is a TUBE, open at both ends: a ring of wall segments with no cap on
             // either side, so looking in through the back you see straight down the dark bore
             // to the fan sitting at the very back of the tube.
-            const int segments = 20;
+            const int segments = 36;    // angular resolution: high enough that the tube reads as round, not faceted
+            const int slices = 12;      // tiles along the length so a bulge can travel down it
             const float tubeLen = 2.4f;
+            const float tubeCenterZ = -0.1f;
             const float tubeR = 1.18f;   // outer wall radius
             const float boreR = 1.02f;    // inner (dark) wall radius
             float segW = 2f * tubeR * Mathf.Sin(Mathf.PI / segments) * 1.08f;
+            float dz = tubeLen / slices;
 
+            // The tube is built from a grid of small tiles (angular segments x length slices)
+            // that tile into the same solid tube as before, but each one can be pushed radially
+            // outward on its own -- that is what lets the fire-squash bulge travel down the bore.
             for (int i = 0; i < segments; i++)
             {
                 float a = (i / (float)segments) * Mathf.PI * 2f;
                 float adeg = a * Mathf.Rad2Deg;
 
-                // Outer yellow wall panel. Its local X is the radial direction, so rotating
-                // the box about Z by the segment angle aims its thin axis straight outwards.
-                var w = AddPart("wall" + i, PrimitiveType.Cube, yellow, Vector3.zero,
-                                new Vector3(0.15f, segW, tubeLen));
-                w.SetParent(barrelPivot, false);
-                w.localPosition = new Vector3(Mathf.Cos(a) * tubeR, Mathf.Sin(a) * tubeR, -0.1f);
-                w.localEulerAngles = new Vector3(0f, 0f, adeg);
+                for (int j = 0; j < slices; j++)
+                {
+                    float z = tubeCenterZ - tubeLen * 0.5f + (j + 0.5f) * dz;
 
-                // Dark inner liner just inside the wall, so the bore reads as hollow.
-                var inn = AddPart("bore" + i, PrimitiveType.Cube, fan, Vector3.zero,
-                                  new Vector3(0.1f, segW, tubeLen * 0.98f));
-                inn.SetParent(barrelPivot, false);
-                inn.localPosition = new Vector3(Mathf.Cos(a) * boreR, Mathf.Sin(a) * boreR, -0.1f);
-                inn.localEulerAngles = new Vector3(0f, 0f, adeg);
+                    // Outer yellow wall tile. Its local X is the radial direction, so rotating
+                    // the box about Z by the segment angle aims its thin axis straight outwards.
+                    var wallScale = new Vector3(0.15f, segW, dz);
+                    var w = AddPart("wall" + i + "_" + j, PrimitiveType.Cube, yellow, Vector3.zero, wallScale);
+                    w.SetParent(barrelPivot, false);
+                    w.localPosition = new Vector3(Mathf.Cos(a) * tubeR, Mathf.Sin(a) * tubeR, z);
+                    w.localEulerAngles = new Vector3(0f, 0f, adeg);
+                    bulgeElems.Add(new BulgeElem { t = w, angle = a, z = z, baseR = tubeR, baseScale = wallScale });
+
+                    // Dark inner liner tile just inside the wall, so the bore reads as hollow.
+                    var boreScale = new Vector3(0.1f, segW, dz * 0.98f);
+                    var inn = AddPart("bore" + i + "_" + j, PrimitiveType.Cube, fan, Vector3.zero, boreScale);
+                    inn.SetParent(barrelPivot, false);
+                    inn.localPosition = new Vector3(Mathf.Cos(a) * boreR, Mathf.Sin(a) * boreR, z);
+                    inn.localEulerAngles = new Vector3(0f, 0f, adeg);
+                    bulgeElems.Add(new BulgeElem { t = inn, angle = a, z = z, baseR = boreR, baseScale = boreScale });
+                }
             }
 
             // Steel rims framing the two open ends of the tube.
-            AddRing("rim_front", barrelPivot, steel, segments, 1.26f, 0.2f, 0.3f, 1.12f);
+            // The front rim is registered as a bulge element so the very mouth stretches with the
+            // travelling bulge; the back rim stays put.
+            AddRing("rim_front", barrelPivot, steel, segments, 1.26f, 0.2f, 0.3f, 1.12f, true);
             AddRing("rim_back", barrelPivot, steel, segments, 1.26f, 0.2f, 0.3f, -1.3f);
 
             // The fan lives INSIDE the tube, at the very back end (the side the player sees
@@ -149,16 +180,19 @@ namespace SnowCannon
             for (int i = 0; i < nozzles; i++)
             {
                 float a = (i / (float)nozzles) * Mathf.PI * 2f;
-                var n = AddPart("nozzle" + i, PrimitiveType.Sphere, steel, Vector3.zero,
-                               new Vector3(0.22f, 0.22f, 0.22f));
+                var nScale = new Vector3(0.22f, 0.22f, 0.22f);
+                var n = AddPart("nozzle" + i, PrimitiveType.Sphere, steel, Vector3.zero, nScale);
                 n.SetParent(barrelPivot, false);
                 n.localPosition = new Vector3(Mathf.Cos(a) * 1.32f, Mathf.Sin(a) * 1.32f, 1.16f);
+                // Register the nozzle ring too, so the outermost lip of the muzzle bulges as the
+                // snowball forces its way out.
+                bulgeElems.Add(new BulgeElem { t = n, angle = a, z = 1.16f, baseR = 1.32f, baseScale = nScale });
             }
 
             // The gray, curvy front shroud: a flared truncated cone like the real unit's nose,
             // with a dark mesh face recessed behind the nozzle ring.
             var gray = Mat.Opaque(new Color(0.55f, 0.57f, 0.60f, 1f));
-            var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 22),
+            var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 36),
                                 gray, new Vector3(0f, 0f, 0.55f), new Vector3(90f, 0f, 0f));
             shroud.SetParent(barrelPivot, false);
 
@@ -220,17 +254,19 @@ namespace SnowCannon
         /// <summary>A ring of thin boxes around the Z axis, used as the steel rim that frames
         /// each open end of the tube.</summary>
         void AddRing(string name, Transform parent, Material mat, int segments,
-                     float radius, float thickness, float length, float z)
+                     float radius, float thickness, float length, float z, bool bulge = false)
         {
             float w = 2f * radius * Mathf.Sin(Mathf.PI / segments) * 1.08f;
             for (int i = 0; i < segments; i++)
             {
                 float a = (i / (float)segments) * Mathf.PI * 2f;
-                var seg = AddPart(name + i, PrimitiveType.Cube, mat, Vector3.zero,
-                                 new Vector3(thickness, w, length));
+                var segScale = new Vector3(thickness, w, length);
+                var seg = AddPart(name + i, PrimitiveType.Cube, mat, Vector3.zero, segScale);
                 seg.SetParent(parent, false);
                 seg.localPosition = new Vector3(Mathf.Cos(a) * radius, Mathf.Sin(a) * radius, z);
                 seg.localEulerAngles = new Vector3(0f, 0f, a * Mathf.Rad2Deg);
+                if (bulge)
+                    bulgeElems.Add(new BulgeElem { t = seg, angle = a, z = z, baseR = radius, baseScale = segScale });
             }
         }
 
@@ -305,13 +341,54 @@ namespace SnowCannon
             var controls = game != null ? game.Controls : null;
             Vector2 move = controls != null ? controls.ReadMove() : Vector2.zero;
 
+            // Advance the fire-squash wave: a bulge travels down the bore as the oversized
+            // snowball forces its way through, and the whole tube dips (recoils) and settles.
+            if (squash > 0f)
+            {
+                squash = Mathf.Max(0f, squash - Time.deltaTime / SquashTime);
+                float prog = 1f - squash;                       // 0 -> 1 across the shot
+                float zc = Mathf.Lerp(BulgeStartZ, BulgeEndZ, prog);
+                // Hold the bulge near full strength through the whole travel so it reaches the
+                // muzzle: a plain sine faded it to nothing before the mouth, leaving the front of
+                // the tube static. Ramp in quickly, hold, then release over the last fifth.
+                float env;
+                if (prog < 0.12f) env = prog / 0.12f;
+                else if (prog > 0.80f) env = (1f - prog) / 0.20f;
+                else env = 1f;
+                float amp = BulgeAmp * env;
+                recoilKick = RecoilMax * Mathf.Sin(Mathf.PI * prog);
+                float inv2w2 = 1f / (2f * BulgeWidth * BulgeWidth);
+                for (int i = 0; i < bulgeElems.Count; i++)
+                {
+                    var e = bulgeElems[i];
+                    float dd = e.z - zc;
+                    float g = Mathf.Exp(-dd * dd * inv2w2);
+                    float r = e.baseR * (1f + amp * g);
+                    float sw = 1f + 0.9f * amp * g;
+                    e.t.localPosition = new Vector3(Mathf.Cos(e.angle) * r, Mathf.Sin(e.angle) * r, e.z);
+                    e.t.localScale = new Vector3(e.baseScale.x * sw, e.baseScale.y * sw, e.baseScale.z);
+                }
+                bulgeActive = true;
+            }
+            else if (bulgeActive)
+            {
+                recoilKick = 0f;
+                for (int i = 0; i < bulgeElems.Count; i++)
+                {
+                    var e = bulgeElems[i];
+                    e.t.localPosition = new Vector3(Mathf.Cos(e.angle) * e.baseR, Mathf.Sin(e.angle) * e.baseR, e.z);
+                    e.t.localScale = e.baseScale;
+                }
+                bulgeActive = false;
+            }
+
             // The cannon never leaves its spot: it only turns in place. The move vector drives
             // the turret's yaw (the whole cannon rotates) and the barrel's elevation (pitch).
             yaw = Mathf.Clamp(yaw + move.x * AimYawSpeed * Time.deltaTime, -MaxYaw, MaxYaw);
             pitch = Mathf.Clamp(pitch + move.y * AimPitchSpeed * Time.deltaTime, MinPitch, MaxPitch);
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
             if (barrelPivot != null)
-                barrelPivot.localEulerAngles = new Vector3(-pitch, 0f, 0f);
+                barrelPivot.localEulerAngles = new Vector3(-(pitch + recoilKick), 0f, 0f);
 
             // While it turns, the whole unit also slides sideways: fully left-aimed it stands
             // a sixth of the screen width left of centre, fully right-aimed a sixth right.
@@ -376,6 +453,17 @@ namespace SnowCannon
             fanSpinDownTimer = FanSpinDownTime;
         }
 
+        /// <summary>One tile of the tube wall (or bore liner) that the fire-squash bulge can
+        /// push radially outward as the snowball travels through it.</summary>
+        sealed class BulgeElem
+        {
+            public Transform t;
+            public float angle;
+            public float z;
+            public float baseR;
+            public Vector3 baseScale;
+        }
+
         void UpdateAim()
         {
             // The barrel pivot is a child of the (yawed) body, so its world forward already
@@ -394,6 +482,92 @@ namespace SnowCannon
             dir = dir.normalized;
             game.SpawnSnowball(MuzzleWorldPosition + dir * 0.4f, dir);
             game.PlayThrowAt(transform.position);
+
+            // Kick the drum and puff snow out of the mouth.
+            squash = 1f;
+            SpawnMuzzleDust(dir);
+        }
+
+        /// <summary>A short burst of soft snow puffs drifting out of the muzzle; each expands
+        /// and fades over ~1 s then destroys itself.</summary>
+        void SpawnMuzzleDust(Vector3 dir)
+        {
+            Vector3 m = MuzzleWorldPosition;
+            int n = Random.Range(5, 8);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 jitter = new Vector3(Random.Range(-0.3f, 0.3f),
+                                             Random.Range(-0.2f, 0.35f),
+                                             Random.Range(-0.3f, 0.3f));
+                DustPuff.Spawn(m + dir * Random.Range(0f, 0.5f) + jitter, dir);
+            }
+        }
+    }
+
+    /// <summary>A single muzzle snow puff: a camera-facing soft sprite that grows, drifts
+    /// outward and fades to nothing over its lifetime, then removes itself. Uses a plain
+    /// SpriteRenderer (built-in sprite shader) so it survives player builds, matching the
+    /// proven cloud/flame approach in Weather.</summary>
+    public sealed class DustPuff : MonoBehaviour
+    {
+        SpriteRenderer sr;
+        Vector3 drift;
+        float life;
+        float maxLife;
+        float startScale;
+        float endScale;
+        float baseAlpha;
+
+        public static void Spawn(Vector3 pos, Vector3 dir)
+        {
+            var go = new GameObject("muzzle_dust");
+            go.transform.position = pos;
+            var puff = go.AddComponent<DustPuff>();
+            var sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = TextureFactory.CircleSprite(1.4f);
+            puff.sr = sr;
+
+            float tint = Random.Range(0.82f, 1f);
+            puff.baseAlpha = Random.Range(0.35f, 0.6f);
+            sr.color = new Color(tint, tint, Random.Range(0.9f, 1f), puff.baseAlpha);
+
+            puff.startScale = Random.Range(0.25f, 0.5f);
+            puff.endScale = puff.startScale * Random.Range(2.4f, 3.6f);
+            puff.maxLife = Random.Range(0.8f, 1.15f);
+            puff.life = puff.maxLife;
+            go.transform.localScale = Vector3.one * puff.startScale;
+
+            // Billow out along the barrel, biased up and splayed sideways.
+            puff.drift = dir * Random.Range(1.2f, 2.6f)
+                       + new Vector3(Random.Range(-1.1f, 1.1f),
+                                      Random.Range(0.3f, 1.4f),
+                                      Random.Range(-0.6f, 0.6f));
+        }
+
+        void Update()
+        {
+            float dt = Time.deltaTime;
+            life -= dt;
+            if (life <= 0f)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            float t = 1f - life / maxLife;                 // 0 -> 1
+            float e = 1f - (1f - t) * (1f - t);            // ease-out growth
+            transform.localScale = Vector3.one * Mathf.Lerp(startScale, endScale, e);
+
+            drift *= Mathf.Max(0f, 1f - 1.6f * dt);        // drag
+            transform.position += drift * dt;
+
+            var cam = Camera.main;
+            if (cam != null)
+                transform.rotation = Quaternion.LookRotation(-cam.transform.forward, cam.transform.up);
+
+            var c = sr.color;
+            c.a = baseAlpha * (1f - t);
+            sr.color = c;
         }
     }
 }

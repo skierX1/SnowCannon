@@ -13,7 +13,7 @@ namespace SnowCannon
         public const float FieldHalfWidth = 10.5f;
         public const float FieldMinZ = -12f;
         public const float FieldMaxZ = 40f;
-        public const float SpawnZ = 34f;
+        public const float SpawnZ = 38f;
         public const float DefeatZ = -9.5f;
         public const float CannonMinZ = -7.5f;
         public const float CannonMaxZ = -2.5f;
@@ -41,7 +41,7 @@ namespace SnowCannon
         public const int FirstLevelDuration = 60;
         public const int SecondLevelDuration = 90;
         public const int LevelDurationStep = 10;
-        public const float FirstSpawnInterval = 2f;
+        public const float FirstSpawnInterval = 1.3333f;
         public const float SpawnIntervalFactor = 0.8f;
         public const float MinSpawnInterval = 0.6f;
 
@@ -51,7 +51,8 @@ namespace SnowCannon
             return FirstLevelDuration + Mathf.Max(0, level - 1);
         }
 
-        /// <summary>Level 1 = 5 s, every next level is 80 % of the previous one.</summary>
+        /// <summary>Level 1 = 1.3333 s (1.5x faster than the old 2 s), every next level is
+        /// 80 % of the previous one, floored at MinSpawnInterval.</summary>
         public static float SpawnInterval(int level)
         {
             float v = FirstSpawnInterval * Mathf.Pow(SpawnIntervalFactor, Mathf.Max(0, level - 1));
