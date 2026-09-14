@@ -18,6 +18,137 @@ namespace SnowCannon
             return TruncatedCone(radius, 0f, height, segments);
         }
 
+        /// <summary>A smooth, welded open cylinder running along the Z axis, centred on z = 0,
+        /// of the given radius and length. Vertices are shared between quads and the normals are
+        /// the true radial directions, so the surface shades as a round tube rather than a ring
+        /// of flat facets. No end caps (the barrel is open at both ends).</summary>
+        public static Mesh Tube(float radius, float length, int segments, int rings)
+        {
+            segments = Mathf.Max(8, segments);
+            rings = Mathf.Max(2, rings);
+            var verts = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            float half = length * 0.5f;
+
+            for (int r = 0; r <= rings; r++)
+            {
+                float z = -half + length * (r / (float)rings);
+                for (int s = 0; s <= segments; s++)
+                {
+                    float a = (s / (float)segments) * Mathf.PI * 2f;
+                    float c = Mathf.Cos(a), sn = Mathf.Sin(a);
+                    verts.Add(new Vector3(c * radius, sn * radius, z));
+                    normals.Add(new Vector3(c, sn, 0f));
+                    uvs.Add(new Vector2(s / (float)segments, r / (float)rings));
+                }
+            }
+
+            int row = segments + 1;
+            for (int r = 0; r < rings; r++)
+            {
+                for (int s = 0; s < segments; s++)
+                {
+                    int a = r * row + s, b = a + 1, c = a + row, e = c + 1;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+
+            var mesh = new Mesh { name = "tube" };
+            mesh.SetVertices(verts);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0, false);
+            mesh.RecalculateBounds();
+            mesh.RecalculateTangents();
+            return mesh;
+        }
+
+        /// <summary>A copy of a (unit-ish) sphere mesh whose surface is pushed in and out along
+        /// its normals by a smooth, seed-stable noise, so the snow balls read as hand-rolled
+        /// lumps rather than perfect spheres. The source mesh is never modified.</summary>
+        public static Mesh LumpySphere(Mesh src, float amp, float seed)
+        {
+            var verts = (Vector3[])src.vertices.Clone();
+            var norms = (Vector3[])src.normals.Clone();
+            var uvs = src.uv;
+            var tris = src.triangles;
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 v = verts[i];
+                Vector3 n = norms[i];
+                float d = amp * (
+                    Mathf.Sin(v.x * 4.1f + seed) * Mathf.Sin(v.y * 3.7f + seed * 1.7f) * Mathf.Sin(v.z * 4.3f + seed * 0.6f)
+                  + 0.5f * Mathf.Sin(v.x * 7.3f + seed * 2.3f) * Mathf.Sin(v.z * 6.7f + seed * 1.1f));
+                verts[i] = v + n * d;
+            }
+
+            var m = new Mesh { name = "lumpy_sphere" };
+            m.SetVertices(verts);
+            m.SetNormals(norms);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(tris, 0, false);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            m.RecalculateTangents();
+            return m;
+        }
+
+        /// <summary>A smooth UV-sphere of radius 0.5 (same footprint as the built-in primitive
+        /// sphere, so a localScale of `diameter` still yields radius diameter/2). Built here so
+        /// the lumpy snow balls never have to read the built-in mesh's vertices, which are not
+        /// always readable.</summary>
+        public static Mesh UVSphere(int rings = 16, int segments = 24)
+        {
+            rings = Mathf.Max(4, rings);
+            segments = Mathf.Max(6, segments);
+            const float rad = 0.5f;
+            var verts = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+
+            for (int r = 0; r <= rings; r++)
+            {
+                float phi = Mathf.PI * (r / (float)rings);          // 0..PI, pole to pole
+                float sy = Mathf.Cos(phi);
+                float rr = Mathf.Sin(phi);
+                for (int s = 0; s <= segments; s++)
+                {
+                    float th = Mathf.PI * 2f * (s / (float)segments);
+                    float nx = rr * Mathf.Cos(th);
+                    float nz = rr * Mathf.Sin(th);
+                    // (nx, sy, nz) is already a unit direction, so scale by the radius directly.
+                    verts.Add(new Vector3(nx * rad, sy * rad, nz * rad));
+                    normals.Add(new Vector3(nx, sy, nz));
+                    uvs.Add(new Vector2(s / (float)segments, r / (float)rings));
+                }
+            }
+
+            int row = segments + 1;
+            for (int r = 0; r < rings; r++)
+            {
+                for (int s = 0; s < segments; s++)
+                {
+                    int a = r * row + s, b = a + 1, c = a + row, e = c + 1;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+
+            var m = new Mesh { name = "uv_sphere" };
+            m.SetVertices(verts);
+            m.SetNormals(normals);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(tris, 0, false);
+            m.RecalculateBounds();
+            m.RecalculateTangents();
+            return m;
+        }
+
         /// <summary>A cone frustum standing on y = 0. radiusTop may be 0 for a sharp tip.</summary>
         public static Mesh TruncatedCone(float radiusBottom, float radiusTop, float height, int segments)
         {
@@ -218,6 +349,60 @@ namespace SnowCannon
         public static Texture2D Snow()
         {
             return Snow(0);
+        }
+
+        /// <summary>The snow field's ground texture: a speckled off-white snow base broken up by
+        /// a few soft, low-frequency dirt patches and a light scatter of tiny brown grains, so the
+        /// field is not a flat uniform white but still clearly reads as snow.</summary>
+        public static Texture2D GroundSnow()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "ground_snow_tex" };
+            var px = new Color32[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float n = Mathf.PerlinNoise(x * 0.09f, y * 0.09f);
+                    byte baseV = (byte)Mathf.Clamp(230 + n * 16f, 200f, 255f);
+                    Color c = new Color32(
+                        (byte)Mathf.Clamp(baseV - 6f, 0f, 255f),
+                        (byte)Mathf.Clamp(baseV - 1f, 0f, 255f),
+                        baseV, 255);
+
+                    // A slow dirt mask: where the low-frequency noise dips, blend a soft brown
+                    // patch in. Kept gentle (max ~45%) so the field stays snow-white overall.
+                    float dirt = Mathf.PerlinNoise(x * 0.017f + 40f, y * 0.017f + 12f);
+                    if (dirt < 0.40f)
+                    {
+                        float k = Mathf.Clamp01((0.40f - dirt) / 0.40f) * 0.45f;
+                        Color brown = new Color(0.46f, 0.34f, 0.22f, 1f);
+                        c = Color.Lerp(c, brown, k);
+                    }
+
+                    px[y * size + x] = c;
+                }
+            }
+
+            // A light scatter of tiny darker grains so up close it is not perfectly clean.
+            for (int i = 0; i < 900; i++)
+            {
+                int x = Random.Range(0, size), y = Random.Range(0, size);
+                float shade = Random.Range(150f, 205f);
+                float jitter = Random.Range(0.85f, 1.1f);
+                px[y * size + x] = new Color32(
+                    (byte)Mathf.Clamp(shade * 1.15f * jitter, 0f, 255f),
+                    (byte)Mathf.Clamp(shade * 0.95f * jitter, 0f, 255f),
+                    (byte)Mathf.Clamp(shade * 0.78f * jitter, 0f, 255f), 255);
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
+            return tex;
         }
 
         /// <summary>

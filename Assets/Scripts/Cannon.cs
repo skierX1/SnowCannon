@@ -47,6 +47,20 @@ namespace SnowCannon
         float recoilKick;
         readonly List<BulgeElem> bulgeElems = new List<BulgeElem>();
         bool bulgeActive;
+
+        // Smooth tube geometry: one welded, smooth-normal cylinder per wall so the barrel reads
+        // as round instead of a faceted ring of boxes. The fire-squash bulge deforms it by
+        // displacing its vertices radially each frame (MeshFactory.Tube + DisplaceTube).
+        const float TubeLen = 2.4f;
+        const float TubeCenterZ = -0.1f;
+        const float TubeR = 1.18f;
+        const float BoreR = 1.02f;
+        const int TubeSegments = 48;
+        const int TubeRings = 16;
+        Mesh wallMesh, boreMesh;
+        Vector3[] wallBase, boreBase, wallScratch, boreScratch;
+        float[] wallAngle, boreAngle;
+
         SnowCannonGame game;
 
         // Barrel aim, in degrees. yaw sweeps left/right, pitch is the elevation above the
@@ -92,51 +106,38 @@ namespace SnowCannon
             // The cannon is a TUBE, open at both ends: a ring of wall segments with no cap on
             // either side, so looking in through the back you see straight down the dark bore
             // to the fan sitting at the very back of the tube.
-            const int segments = 36;    // angular resolution: high enough that the tube reads as round, not faceted
-            const int slices = 12;      // tiles along the length so a bulge can travel down it
-            const float tubeLen = 2.4f;
-            const float tubeCenterZ = -0.1f;
-            const float tubeR = 1.18f;   // outer wall radius
-            const float boreR = 1.02f;    // inner (dark) wall radius
-            float segW = 2f * tubeR * Mathf.Sin(Mathf.PI / segments) * 1.08f;
-            float dz = tubeLen / slices;
+            // The tube is one smooth, welded cylinder mesh (shared vertices, smooth normals) so it
+            // reads as a round barrel instead of a faceted ring of boxes. The fire-squash bulge is
+            // applied by displacing its vertices radially each frame (see DisplaceTube in Update).
+            wallMesh = MeshFactory.Tube(TubeR, TubeLen, TubeSegments, TubeRings);
+            wallBase = wallMesh.vertices;
+            wallAngle = DeriveAngles(wallBase);
+            wallScratch = new Vector3[wallBase.Length];
+            var wallGo = new GameObject("wall");
+            wallGo.AddComponent<MeshFilter>().sharedMesh = wallMesh;
+            wallGo.AddComponent<MeshRenderer>().material = yellow;
+            wallGo.transform.SetParent(barrelPivot, false);
+            wallGo.transform.localPosition = new Vector3(0f, 0f, TubeCenterZ);
 
-            // The tube is built from a grid of small tiles (angular segments x length slices)
-            // that tile into the same solid tube as before, but each one can be pushed radially
-            // outward on its own -- that is what lets the fire-squash bulge travel down the bore.
-            for (int i = 0; i < segments; i++)
-            {
-                float a = (i / (float)segments) * Mathf.PI * 2f;
-                float adeg = a * Mathf.Rad2Deg;
-
-                for (int j = 0; j < slices; j++)
-                {
-                    float z = tubeCenterZ - tubeLen * 0.5f + (j + 0.5f) * dz;
-
-                    // Outer yellow wall tile. Its local X is the radial direction, so rotating
-                    // the box about Z by the segment angle aims its thin axis straight outwards.
-                    var wallScale = new Vector3(0.15f, segW, dz);
-                    var w = AddPart("wall" + i + "_" + j, PrimitiveType.Cube, yellow, Vector3.zero, wallScale);
-                    w.SetParent(barrelPivot, false);
-                    w.localPosition = new Vector3(Mathf.Cos(a) * tubeR, Mathf.Sin(a) * tubeR, z);
-                    w.localEulerAngles = new Vector3(0f, 0f, adeg);
-                    bulgeElems.Add(new BulgeElem { t = w, angle = a, z = z, baseR = tubeR, baseScale = wallScale });
-
-                    // Dark inner liner tile just inside the wall, so the bore reads as hollow.
-                    var boreScale = new Vector3(0.1f, segW, dz * 0.98f);
-                    var inn = AddPart("bore" + i + "_" + j, PrimitiveType.Cube, fan, Vector3.zero, boreScale);
-                    inn.SetParent(barrelPivot, false);
-                    inn.localPosition = new Vector3(Mathf.Cos(a) * boreR, Mathf.Sin(a) * boreR, z);
-                    inn.localEulerAngles = new Vector3(0f, 0f, adeg);
-                    bulgeElems.Add(new BulgeElem { t = inn, angle = a, z = z, baseR = boreR, baseScale = boreScale });
-                }
-            }
+            // Dark inner liner just inside the wall so the bore reads as hollow. Double-sided so
+            // the camera looking in through the open back sees the inner surface.
+            var boreMat = Mat.Opaque(new Color(0.10f, 0.11f, 0.13f, 1f));
+            boreMat.SetFloat("_Cull", 0f);
+            boreMesh = MeshFactory.Tube(BoreR, TubeLen * 0.98f, TubeSegments, TubeRings);
+            boreBase = boreMesh.vertices;
+            boreAngle = DeriveAngles(boreBase);
+            boreScratch = new Vector3[boreBase.Length];
+            var boreGo = new GameObject("bore");
+            boreGo.AddComponent<MeshFilter>().sharedMesh = boreMesh;
+            boreGo.AddComponent<MeshRenderer>().material = boreMat;
+            boreGo.transform.SetParent(barrelPivot, false);
+            boreGo.transform.localPosition = new Vector3(0f, 0f, TubeCenterZ);
 
             // Steel rims framing the two open ends of the tube.
             // The front rim is registered as a bulge element so the very mouth stretches with the
             // travelling bulge; the back rim stays put.
-            AddRing("rim_front", barrelPivot, steel, segments, 1.26f, 0.2f, 0.3f, 1.12f, true);
-            AddRing("rim_back", barrelPivot, steel, segments, 1.26f, 0.2f, 0.3f, -1.3f);
+            AddRing("rim_front", barrelPivot, steel, TubeSegments, 1.26f, 0.2f, 0.3f, 1.12f, true);
+            AddRing("rim_back", barrelPivot, steel, TubeSegments, 1.26f, 0.2f, 0.3f, -1.3f);
 
             // The fan lives INSIDE the tube, at the very back end (the side the player sees
             // through the open back). It sits still for a short wind-up, then spins up.
@@ -189,11 +190,12 @@ namespace SnowCannon
                 bulgeElems.Add(new BulgeElem { t = n, angle = a, z = 1.16f, baseR = 1.32f, baseScale = nScale });
             }
 
-            // The gray, curvy front shroud: a flared truncated cone like the real unit's nose,
-            // with a dark mesh face recessed behind the nozzle ring.
-            var gray = Mat.Opaque(new Color(0.55f, 0.57f, 0.60f, 1f));
-            var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 36),
-                                gray, new Vector3(0f, 0f, 0.55f), new Vector3(90f, 0f, 0f));
+            // The yellow, curvy front shroud: a flared truncated cone like the real unit's nose,
+            // with a dark mesh face recessed behind the nozzle ring. Painted the cannon's yellow so
+            // the barrel body reads yellow, not gray.
+            var shroudMat = Mat.Opaque(GameConfig.CannonYellow);
+            var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 48),
+                                shroudMat, new Vector3(0f, 0f, 0.55f), new Vector3(90f, 0f, 0f));
             shroud.SetParent(barrelPivot, false);
 
             var face = AddPart("fan_face", PrimitiveType.Cylinder, fan, Vector3.zero,
@@ -249,6 +251,37 @@ namespace SnowCannon
             rb.isKinematic = true;
 
             UpdateAim();
+        }
+
+        /// <summary>Pushes a smooth tube mesh's vertices radially outward along the travelling
+        /// gaussian bulge, then recomputes its (still smooth) normals.</summary>
+        void DisplaceTube(Mesh m, Vector3[] baseVerts, float[] ang, Vector3[] scratch,
+                          float baseR, float zc, float amp, float inv2w2)
+        {
+            if (m == null || baseVerts == null) return;
+            for (int i = 0; i < baseVerts.Length; i++)
+            {
+                float dd = (baseVerts[i].z + TubeCenterZ) - zc;
+                float g = Mathf.Exp(-dd * dd * inv2w2);
+                float r = baseR * (1f + amp * g);
+                scratch[i] = new Vector3(Mathf.Cos(ang[i]) * r, Mathf.Sin(ang[i]) * r, baseVerts[i].z);
+            }
+            m.vertices = scratch;
+            m.RecalculateNormals();
+        }
+
+        void ResetTube(Mesh m, Vector3[] baseVerts)
+        {
+            if (m == null || baseVerts == null) return;
+            m.vertices = baseVerts;
+            m.RecalculateNormals();
+        }
+
+        static float[] DeriveAngles(Vector3[] verts)
+        {
+            var a = new float[verts.Length];
+            for (int i = 0; i < verts.Length; i++) a[i] = Mathf.Atan2(verts[i].y, verts[i].x);
+            return a;
         }
 
         /// <summary>A ring of thin boxes around the Z axis, used as the steel rim that frames
@@ -358,6 +391,9 @@ namespace SnowCannon
                 float amp = BulgeAmp * env;
                 recoilKick = RecoilMax * Mathf.Sin(Mathf.PI * prog);
                 float inv2w2 = 1f / (2f * BulgeWidth * BulgeWidth);
+                // Push the smooth tube walls out along the travelling bulge, then the rims/nozzles.
+                DisplaceTube(wallMesh, wallBase, wallAngle, wallScratch, TubeR, zc, amp, inv2w2);
+                DisplaceTube(boreMesh, boreBase, boreAngle, boreScratch, BoreR, zc, amp, inv2w2);
                 for (int i = 0; i < bulgeElems.Count; i++)
                 {
                     var e = bulgeElems[i];
@@ -373,6 +409,8 @@ namespace SnowCannon
             else if (bulgeActive)
             {
                 recoilKick = 0f;
+                ResetTube(wallMesh, wallBase);
+                ResetTube(boreMesh, boreBase);
                 for (int i = 0; i < bulgeElems.Count; i++)
                 {
                     var e = bulgeElems[i];
@@ -475,6 +513,9 @@ namespace SnowCannon
         void Fire()
         {
             if (game == null) return;
+            // Spend a mark of lake water; if the lake has run dry the shot is refused (the basin
+            // flashes) until snowmen keep arriving to refill it.
+            if (!game.TryConsumeLake()) return;
             // Launch along the barrel's actual 3D facing (yaw + elevation). Gravity in Snowball
             // then curves it into a ballistic arc, so the angle the player set decides the range.
             Vector3 dir = AimDirection;
@@ -493,13 +534,24 @@ namespace SnowCannon
         void SpawnMuzzleDust(Vector3 dir)
         {
             Vector3 m = MuzzleWorldPosition;
-            int n = Random.Range(5, 8);
+            Vector3 f = dir.normalized;
+            // Two axes perpendicular to the barrel so the puff can splay out in a wide cone around
+            // the muzzle, not just straight down the bore.
+            Vector3 r = Vector3.Cross(f, Vector3.up);
+            if (r.sqrMagnitude < 0.0001f) r = Vector3.Cross(f, Vector3.forward);
+            r.Normalize();
+            Vector3 u = Vector3.Cross(r, f).normalized;
+
+            int n = Random.Range(18, 26);
             for (int i = 0; i < n; i++)
             {
-                Vector3 jitter = new Vector3(Random.Range(-0.3f, 0.3f),
-                                             Random.Range(-0.2f, 0.35f),
-                                             Random.Range(-0.3f, 0.3f));
-                DustPuff.Spawn(m + dir * Random.Range(0f, 0.5f) + jitter, dir);
+                float ang = Random.Range(0f, Mathf.PI * 2f);
+                Vector3 radial = r * Mathf.Cos(ang) + u * Mathf.Sin(ang);
+                float rad = Mathf.Sqrt(Random.Range(0f, 1f));
+                Vector3 off = radial * (rad * Random.Range(0.2f, 0.7f));
+                Vector3 side = radial * Random.Range(1.4f, 3.4f);
+                Vector3 vel = f * Random.Range(0.8f, 2.2f) + side + Vector3.up * Random.Range(0.2f, 1.1f);
+                DustPuff.Spawn(m + f * Random.Range(0f, 0.4f) + off, vel);
             }
         }
     }
@@ -518,30 +570,28 @@ namespace SnowCannon
         float endScale;
         float baseAlpha;
 
-        public static void Spawn(Vector3 pos, Vector3 dir)
+        public static void Spawn(Vector3 pos, Vector3 velocity)
         {
             var go = new GameObject("muzzle_dust");
             go.transform.position = pos;
             var puff = go.AddComponent<DustPuff>();
             var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = TextureFactory.CircleSprite(1.4f);
+            sr.sprite = TextureFactory.CircleSprite(1.2f);
+            sr.sortingOrder = 60;
             puff.sr = sr;
 
-            float tint = Random.Range(0.82f, 1f);
-            puff.baseAlpha = Random.Range(0.35f, 0.6f);
-            sr.color = new Color(tint, tint, Random.Range(0.9f, 1f), puff.baseAlpha);
+            float tint = Random.Range(0.86f, 1f);
+            puff.baseAlpha = Random.Range(0.55f, 0.9f);
+            sr.color = new Color(tint, tint, Random.Range(0.92f, 1f), puff.baseAlpha);
 
-            puff.startScale = Random.Range(0.25f, 0.5f);
-            puff.endScale = puff.startScale * Random.Range(2.4f, 3.6f);
-            puff.maxLife = Random.Range(0.8f, 1.15f);
+            puff.startScale = Random.Range(0.4f, 0.75f);
+            puff.endScale = puff.startScale * Random.Range(3.0f, 4.6f);
+            puff.maxLife = Random.Range(0.9f, 1.35f);
             puff.life = puff.maxLife;
             go.transform.localScale = Vector3.one * puff.startScale;
 
-            // Billow out along the barrel, biased up and splayed sideways.
-            puff.drift = dir * Random.Range(1.2f, 2.6f)
-                       + new Vector3(Random.Range(-1.1f, 1.1f),
-                                      Random.Range(0.3f, 1.4f),
-                                      Random.Range(-0.6f, 0.6f));
+            // Caller supplies the wide-angle splay velocity.
+            puff.drift = velocity;
         }
 
         void Update()

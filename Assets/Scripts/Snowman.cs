@@ -79,10 +79,13 @@ namespace SnowCannon
             var snowDirty = Mat.SnowMaterialDirt(textureVariant);
             Register(snowDirty);
 
-            // The three stacked balls. The lowest one is the rolling wheel.
-            bottomBall = AddSphere("ball_bottom", snowDirty, new Vector3(0, Yb, 0), Rb * 2f);
-            AddSphere("ball_middle", snow, new Vector3(0, Ym, 0), Rm * 2f);
-            var head = AddSphere("ball_head", snow, new Vector3(0, Yt, 0), Rt * 2f);
+            // The three stacked balls. The lowest one is the rolling wheel. They are built from
+            // a small shared pool of noise-displaced spheres so they read as hand-rolled lumps,
+            // not perfect billiard balls. Each snowman picks its own variant so the field varies.
+            int ballVariant = Random.Range(0, 100000);
+            bottomBall = AddLumpyBall("ball_bottom", snowDirty, new Vector3(0, Yb, 0), Rb * 2f, ballVariant);
+            AddLumpyBall("ball_middle", snow, new Vector3(0, Ym, 0), Rm * 2f, ballVariant + 1);
+            AddLumpyBall("ball_head", snow, new Vector3(0, Yt, 0), Rt * 2f, ballVariant + 2);
 
             var coal = Mat.Opaque(GameConfig.CoalBlack);
             Register(coal);
@@ -182,6 +185,36 @@ namespace SnowCannon
             Destroy(p.GetComponent<Collider>());
             Track(p, mat);
             return p.transform;
+        }
+
+        // A small shared pool of hand-rolled lumpy spheres, built once and reused by every
+        // snowman. Keyed by variant so the field varies but we never rebuild geometry per spawn.
+        static readonly Mesh[] lumpyPool = new Mesh[8];
+
+        static Mesh LumpyMesh(int variant)
+        {
+            int idx = Mathf.Abs(variant) % lumpyPool.Length;
+            var cached = lumpyPool[idx];
+            if (cached != null) return cached;
+            // Subtle amplitude so the balls read as slightly irregular, not deformed.
+            float seed = idx * 12.9898f + 1.7f;
+            var mesh = MeshFactory.LumpySphere(MeshFactory.UVSphere(16, 24), 0.045f, seed);
+            lumpyPool[idx] = mesh;
+            return mesh;
+        }
+
+        Transform AddLumpyBall(string name, Material mat, Vector3 localPos, float diameter, int variant)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale = Vector3.one * diameter;
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = LumpyMesh(variant);
+            var r = go.AddComponent<MeshRenderer>();
+            r.material = mat;
+            Track(go, mat);
+            return go.transform;
         }
 
         Transform AddMeshPart(string name, Mesh mesh, Material mat, Vector3 localPos,

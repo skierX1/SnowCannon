@@ -39,6 +39,7 @@ namespace SnowCannon
         float gameOverCooldown;
 
         Cannon cannon;
+        Lake lake;
         int totalSpawned;
         int snowballsFired;
 
@@ -150,8 +151,19 @@ namespace SnowCannon
             Destroy(ground.GetComponent<Collider>());
             ground.transform.position = new Vector3(0f, 0f, 12f);
             ground.transform.localScale = new Vector3(90f, 1f, 140f);
-            ground.GetComponent<MeshRenderer>().material =
-                Mat.Textured(TextureFactory.Snow(), GameConfig.GroundSnow);
+            var groundMat = Mat.Textured(TextureFactory.GroundSnow(), GameConfig.GroundSnow);
+            // The plane is 900 x 1400 world units but its UVs span 0..1 once, so tile the snow
+            // texture to a square world scale (~12.5 units per tile) to keep the dirt patches and
+            // grain at a believable size instead of stretched across the whole field.
+            var groundTex = groundMat.mainTexture;
+            if (groundTex != null)
+            {
+                groundTex.wrapMode = TextureWrapMode.Repeat;
+                groundTex.anisoLevel = 4;
+            }
+            groundMat.mainTextureScale = new Vector2(72f, 112f);
+            groundMat.SetTextureScale("_BaseMap", new Vector2(72f, 112f));
+            ground.GetComponent<MeshRenderer>().material = groundMat;
 
             // A whisper of atmosphere: sparse flakes and a few faint drifting clouds.
             Weather.Attach(transform);
@@ -191,10 +203,12 @@ namespace SnowCannon
 
         void UpdatePlaying()
         {
-            // ESC leaves the game at any time, straight out of the application.
+            // ESC returns to the title screen (a second ESC on the menu is what quits). Release
+            // the captured cursor first so the menu buttons are usable, then load the menu scene.
             if (Controls != null && Controls.IsEscapePressed())
             {
-                GameFlow.Quit();
+                ConfigureCursorForMenu();
+                SceneManager.LoadScene(GameSession.MenuScene);
                 return;
             }
 
@@ -262,6 +276,10 @@ namespace SnowCannon
             sm.transform.position = new Vector3(x, 0f, z);
             active.Add(sm);
             totalSpawned++;
+
+            // Every snowman that arrives pours water back into the lake, so letting the wave
+            // build reloads the cannon -- but a snowman that reaches the bottom ends the run.
+            if (lake != null) lake.OnSnowmanSpawned();
 #if UNITY_EDITOR
             if (smokeEnabled) SmokeLog("spawn@" + smokeElapsed.ToString("0.0") + " x=" + x.ToString("0.0"));
 #endif
@@ -325,6 +343,15 @@ namespace SnowCannon
             Snowball.Fire(origin, direction, this);
         }
 
+        /// <summary>The cannon asks before every shot: true only while the lake still holds
+        /// water (one mark is spent). When the lake is dry the shot is refused and the basin
+        /// flashes. With no lake present (e.g. a bare test scene) firing is unrestricted.</summary>
+        public bool TryConsumeLake()
+        {
+            if (lake == null) return true;
+            return lake.OnFireAttempt();
+        }
+
         public void PlayThrowAt(Vector3 worldPosition)
         {
             if (AudioDirector.Instance != null) AudioDirector.Instance.PlayThrow();
@@ -357,6 +384,9 @@ namespace SnowCannon
             var canvas = Ui.CreateCanvas("HUD", 10);
             var root = Ui.NewRect("root", canvas.transform);
             Ui.Stretch(root);
+
+            // The water lake in the bottom-left corner: the cannon's ammunition gauge.
+            lake = Lake.Create(root);
 
             // Top-right scoreboard.
             var board = Ui.NewRect("board", root);

@@ -33,6 +33,15 @@ namespace SnowCannon
         public const float SnowmanMaxSpeed = 4.2f;
         public const float DeathFadeTime = 2.0f;
 
+        // ---- Lake (the cannon's water ammunition) ------------------------------
+        // Every snowman that spawns pours LakeSpawnGain marks into the lake; every shot spends
+        // LakeFireCost. The cannon can only fire while the lake holds water, so the player must
+        // let snowmen keep coming to reload. The level is clamped to [0, LakeMaxMarks].
+        public const int LakeMaxMarks = 50;
+        public const int LakeSpawnGain = 2;
+        public const int LakeFireCost = 1;
+        public const int LakeStartMarks = 12;
+
         // ---- Scoring -----------------------------------------------------------
         public const int PointsHead = 2;
         public const int PointsBody = 1;
