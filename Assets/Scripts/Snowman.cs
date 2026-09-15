@@ -8,7 +8,7 @@ namespace SnowCannon
     /// branch arms with hands. The bottom ball rolls while the stack advances. One hit
     /// destroys the whole thing: the parts tumble to the ground and fade out over two seconds.
     /// </summary>
-    public sealed class Snowman : MonoBehaviour
+    public sealed class Snowman : MonoBehaviour, IHitTarget
     {
         // Local geometry, before the per-instance scale is applied.
         const float Rb = 0.62f;
@@ -22,8 +22,15 @@ namespace SnowCannon
         public bool IsDying { get; private set; }
         public bool IsDone { get; private set; }
 
+        /// <summary>IHitTarget: a snowman still counts as a live target until it is dying or gone.</summary>
+        public bool Alive => !IsDying && !IsDone;
+
         /// <summary>World Y of the head centre, used to decide head vs body hits.</summary>
         public float HeadWorldY { get; private set; }
+
+        /// <summary>World-space radius of the snowman's ground footprint, used for proximity
+        /// tests against the cannon, lake and hose.</summary>
+        public float FootprintRadius { get { return Rb * size; } }
 
         /// <summary>Every live snowman, so two of them can detect and bounce off each other
         /// without the game having to hand the whole list to each Update.</summary>

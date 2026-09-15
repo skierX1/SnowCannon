@@ -15,6 +15,16 @@ namespace SnowCannon
         [SerializeField] AudioClip[] screamClips;
         [SerializeField] AudioClip musicClip;
 
+        // The scooter engine idle is synthesised lazily and shared by every live scooter, which
+        // each mount it on their own 3D AudioSource so the putter tracks the vehicle across screen.
+        AudioClip scooterClip;
+
+        /// <summary>The shared looping scooter engine clip, built once on first use.</summary>
+        public AudioClip ScooterClip
+        {
+            get { if (scooterClip == null) scooterClip = AudioFactory.ScooterEngine(); return scooterClip; }
+        }
+
         readonly List<AudioSource> throwPool = new List<AudioSource>();
         readonly List<AudioSource> screamPool = new List<AudioSource>();
         AudioSource musicSource;

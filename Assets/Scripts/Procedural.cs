@@ -910,6 +910,36 @@ namespace SnowCannon
             return tex;
         }
 
+        /// <summary>A repeating stripe pattern for the supply hose. The V axis runs along the
+        /// tube length, so scrolling the texture's V offset makes the light bands travel from the
+        /// lake toward the cannon, reading as water flowing through the hose.</summary>
+        public static Texture2D HoseFlow()
+        {
+            const int w = 16, h = 64;
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false) { name = "hose_flow" };
+            var px = new Color32[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                // A soft travelling band along the length (V), brightening the stripe.
+                float band = 0.5f + 0.5f * Mathf.Sin((y / (float)h) * Mathf.PI * 2f * 4f);
+                byte bright = (byte)Mathf.Clamp(150f + band * 105f, 0f, 255f);
+                for (int x = 0; x < w; x++)
+                {
+                    // Slightly darker at the tube silhouette edges (U) for a rounded look.
+                    float edge = Mathf.Abs((x / (float)(w - 1)) * 2f - 1f);
+                    byte r = (byte)(bright * (1f - edge * 0.35f));
+                    byte g = (byte)(bright * (1f - edge * 0.35f));
+                    byte b = (byte)(bright * (1f - edge * 0.20f));
+                    px[y * w + x] = new Color32(r, g, b, 255);
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Bilinear;
+            return tex;
+        }
+
         /// <summary>Opaque white square, the workhorse sprite for UI shapes.</summary>
         public static Texture2D SolidWhite()
         {
@@ -1176,6 +1206,31 @@ namespace SnowCannon
                 list.Add(Clip("scream_" + v, data));
             }
             return list.ToArray();
+        }
+
+        /// <summary>A looping, two-stroke scooter engine idle: a low sawtooth chug with a
+        /// puttering amplitude wobble and a touch of exhaust noise. Loopable (whole number of
+        /// chug cycles) so the scooter can play it continuously while it is on screen.</summary>
+        public static AudioClip ScooterEngine()
+        {
+            const float dur = 1.0f;
+            const int chugs = 22;                       // whole cycles -> seamless loop
+            int n = (int)(Rate * dur);
+            var data = new float[n];
+            float lastNoise = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)Rate;
+                float cyc = (t / dur) * chugs * Mathf.PI * 2f;   // chug phase
+                float f = 92f + 26f * Mathf.Sin(cyc * 0.5f);     // wobbling idle rpm
+                float saw = 2f * (t * f - Mathf.Floor(0.5f + t * f));   // -1..1 sawtooth
+                float pulse = 0.55f + 0.45f * Mathf.Sin(cyc);            // puttering envelope
+                float white = Random.Range(-1f, 1f);
+                lastNoise = lastNoise * 0.80f + white * 0.20f;           // exhaust hiss
+                float s = saw * 0.5f + Mathf.Sin(2f * Mathf.PI * f * 2f * t) * 0.12f + lastNoise * 0.18f;
+                data[i] = s * pulse * 0.5f;
+            }
+            return Clip("scooter", data);
         }
 
         /// <summary>A short, cheerful, seamlessly loopable tune.</summary>

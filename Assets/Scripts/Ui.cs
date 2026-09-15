@@ -53,7 +53,8 @@ namespace SnowCannon
             try
             {
                 var f = Font.CreateDynamicFontFromOSFont(
-                    new[] { "Arial", "Segoe UI", "Segoe UI Variable Text VF", "Tahoma", "Verdana", "Microsoft Sans Serif" }, 16);
+                    new[] { "Arial", "Segoe UI", "Segoe UI Variable Text VF", "Tahoma", "Verdana", "Microsoft Sans Serif",
+                            "Roboto", "Droid Sans", "Noto Sans", "Source Sans Pro", "Open Sans", "Lato", "Liberation Sans", "DejaVu Sans" }, 16);
                 if (f != null) return f;
             }
             catch { }
@@ -90,13 +91,42 @@ namespace SnowCannon
             return canvas;
         }
 
-        /// <summary>The new Input System drives the EventSystem, never the legacy module.</summary>
+        /// <summary>The new Input System drives the EventSystem, never the legacy module. If an
+        /// EventSystem already exists but is wired to the old standalone (legacy-input) module, we
+        /// swap in the Input System module so touch reaches uGUI on a device that has no legacy
+        /// input stack (Android).</summary>
         public static void EnsureEventSystem()
         {
-            if (EventSystem.current != null) return;
-            var go = new GameObject("EventSystem");
-            go.AddComponent<EventSystem>();
-            go.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+            var es = EventSystem.current;
+            if (es == null)
+            {
+                var go = new GameObject("EventSystem");
+                es = go.AddComponent<EventSystem>();
+                go.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+                return;
+            }
+            // An EventSystem is present but may carry the legacy StandaloneInputModule (e.g. left
+            // over from a scene template). On Android that module gets no touch events, so force the
+            // new Input System module in whenever the current one is not already it.
+            if (!(es.currentInputModule is UnityEngine.InputSystem.UI.InputSystemUIInputModule))
+            {
+                var old = es.currentInputModule;
+                if (old != null) UnityEngine.Object.Destroy(old);
+                es.gameObject.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+            }
+        }
+
+        static UiTouchFallback s_touchFallback;
+
+        /// <summary>The one raw-touch button driver, created lazily on the first button built in a
+        /// scene. It is scene-local (not persisted) so each scene gets a fresh one bound to that
+        /// scene's canvas raycaster; a destroyed instance compares null and is transparently rebuilt.</summary>
+        public static UiTouchFallback GetTouchFallback()
+        {
+            if (s_touchFallback != null) return s_touchFallback;
+            var go = new GameObject("UiTouchFallback");
+            s_touchFallback = go.AddComponent<UiTouchFallback>();
+            return s_touchFallback;
         }
 
         public static RectTransform NewRect(string name, Transform parent)
@@ -225,7 +255,19 @@ namespace SnowCannon
             txtShadow.effectColor = new Color(0f, 0f, 0.08f, 0.4f);
             txtShadow.effectDistance = new Vector2(0f, -2f);
 
-            if (onClick != null) btn.onClick.AddListener(() => onClick());
+            if (onClick != null)
+            {
+                // Register with the raw-touch driver so a real finger tap fires the action even when
+                // the Input System UI pointer path does not raise onClick on Android. The uGUI listener
+                // below is de-duped against it, so a single tap triggers the action exactly once.
+                GetTouchFallback().Register(btn, onClick);
+                btn.onClick.AddListener(() =>
+                {
+                    var fb = s_touchFallback;
+                    if (fb != null && fb.FiredRecently(btn)) return;   // already fired by the raw path
+                    onClick();
+                });
+            }
             return btn;
         }
 

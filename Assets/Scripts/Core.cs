@@ -3,6 +3,20 @@ using UnityEngine;
 namespace SnowCannon
 {
     /// <summary>
+    /// Anything a snowball can connect with and score against: the snowmen, the background
+    /// people and the snow scooter all implement this so the projectile needs only one path.
+    /// </summary>
+    public interface IHitTarget
+    {
+        /// <summary>False once the target is dying or gone, so a second ball cannot double-score.</summary>
+        bool Alive { get; }
+
+        /// <summary>Registers a hit at the world point, plays the death animation, and reports the
+        /// points earned (0 when the hit did not count). The caller despawns the snowball either way.</summary>
+        bool Hit(Vector3 hitPoint, out int points);
+    }
+
+    /// <summary>
     /// Central tuning values for the whole game. World convention: the camera sits at
     /// negative Z and looks toward positive Z, so snowmen spawn far away (large Z) and
     /// advance toward the camera (decreasing Z).
@@ -40,11 +54,14 @@ namespace SnowCannon
         public const int LakeMaxMarks = 50;
         public const int LakeSpawnGain = 2;
         public const int LakeFireCost = 1;
-        public const int LakeStartMarks = 12;
+        public const int LakeStartMarks = 45;
 
         // ---- Scoring -----------------------------------------------------------
         public const int PointsHead = 2;
         public const int PointsBody = 1;
+        // A background person on foot is worth one point; the fast snow scooter is worth three.
+        public const int PointsSkier = 1;
+        public const int PointsScooter = 3;
 
         // ---- Level progression -------------------------------------------------
         public const int FirstLevelDuration = 60;
@@ -76,6 +93,15 @@ namespace SnowCannon
         /// edges. Clamped to a sane range so a degenerate camera never flings them off-world.</summary>
         public static float VisibleHalfWidthAtZ(Camera cam, float z)
         {
+            return VisibleHalfWidthAtZ(cam, z, 22f);
+        }
+
+        /// <summary>The half-width of the field visible at a world depth, with a caller-chosen
+        /// ceiling. The snowman/lake lane uses the 22-unit default (tuned for the near marching
+        /// band); far-background traffic passes a generous ceiling so it is not pinned to the
+        /// middle of a wide desktop screen. Only guards against a degenerate camera.</summary>
+        public static float VisibleHalfWidthAtZ(Camera cam, float z, float maxClamp)
+        {
             if (cam == null) return FieldHalfWidth;
             Vector3 fwd = cam.transform.forward;
             float fz = Mathf.Abs(fwd.z);
@@ -84,7 +110,17 @@ namespace SnowCannon
             if (dist <= 0f) return FieldHalfWidth;
             float halfH = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.PI / 180f) * dist;
             float halfW = halfH * Mathf.Max(0.2f, cam.aspect);
-            return Mathf.Clamp(halfW, 3f, 22f);
+            return Mathf.Clamp(halfW, 3f, maxClamp);
+        }
+
+        /// <summary>The true visible half-width at a depth for the far-background skiers and the
+        /// snow scooter, which must run fully edge to edge. Unlike the snowman-facing overload it
+        /// is NOT capped at 22 (that value is tuned for the near marching lane and would pin
+        /// distant traffic to the middle of a wide desktop screen); it only keeps a degenerate
+        /// camera from flinging them to infinity.</summary>
+        public static float BackgroundHalfWidthAtZ(Camera cam, float z)
+        {
+            return VisibleHalfWidthAtZ(cam, z, 90f);
         }
 
         // ---- Palette -----------------------------------------------------------

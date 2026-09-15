@@ -79,10 +79,10 @@ namespace SnowCannon
             {
                 if (hit.transform != null)
                 {
-                    var sm = hit.transform.GetComponentInParent<Snowman>();
-                    if (sm != null)
+                    var t = hit.transform.GetComponentInParent<IHitTarget>();
+                    if (t != null && t.Alive)
                     {
-                        OnHit(sm, hit.point);
+                        OnHit(t, hit.point);
                         return;
                     }
                 }
@@ -95,16 +95,20 @@ namespace SnowCannon
             // affects the trajectory or hit detection.
             if (spinSpeed > 0f) transform.Rotate(spinAxis, spinSpeed * Time.deltaTime, Space.World);
 
-            // Out of the play field entirely, or dropped onto the snow.
+            // Out of the play field entirely, or dropped onto the snow. The x bound is generous
+            // (not the narrow logical FieldHalfWidth) because snowmen are dealt across the full
+            // VISIBLE width, which on a wide screen reaches well past FieldHalfWidth; killing the
+            // ball at the logical width made far-left/far-right snowmen unreachable. The y floor
+            // allows a little below ground so a low arc can still clip a snowman's base.
             var p = transform.position;
             if (p.z > GameConfig.FieldMaxZ + 6f || p.z < GameConfig.FieldMinZ - 6f ||
-                Mathf.Abs(p.x) > GameConfig.FieldHalfWidth + 4f || p.y > 24f || p.y < 0f)
+                Mathf.Abs(p.x) > 40f || p.y > 24f || p.y < -0.6f)
             {
                 Despawn();
             }
         }
 
-        void OnHit(Snowman target, Vector3 point)
+        void OnHit(IHitTarget target, Vector3 point)
         {
             int points;
             bool counted = target.Hit(point, out points);

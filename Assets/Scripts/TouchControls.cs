@@ -46,32 +46,33 @@ namespace SnowCannon
 
         void BuildStick(RectTransform root)
         {
-            // The whole left half is the drag surface, so the stick appears wherever a thumb lands.
+            // A FIXED joystick parked at 1/3 of the screen width, low down (the same height band
+            // the cannon occupies), so it sits to the LEFT of the cannon. It is always visible
+            // rather than floating to the thumb, per the requested layout.
+            float cx = Screen.width / 3f;
+            float cy = 210f;
+            const float baseSize = 300f;
+
             var zone = Ui.NewRect("stick_zone", root);
-            Ui.Place(zone, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                     new Vector2(0f, 0f), new Vector2(Screen.width * 0.46f, Screen.height));
-            zone.anchorMin = Vector2.zero;
-            zone.anchorMax = new Vector2(0.46f, 1f);
-            zone.offsetMin = Vector2.zero;
-            zone.offsetMax = Vector2.zero;
+            Ui.Place(zone, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                     new Vector2(cx, cy), new Vector2(baseSize, baseSize));
 
             var bg = zone.gameObject.AddComponent<Image>();
             bg.sprite = Ui.Circle;
-            // A faint but clearly visible disc so the player can see where the stick lives.
             bg.color = new Color(1f, 1f, 1f, 0.16f);
             bg.raycastTarget = true;
             bg.preserveAspect = false;
 
-            // A visible outer ring + inner knob so the stick reads on a bright snowy screen.
+            // A visible outer ring so the stick reads on a bright snowy screen.
             var ring = Ui.NewRect("ring", zone);
-            Ui.Place(ring, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                     new Vector2(150f, 150f), new Vector2(240f, 240f));
+            Ui.Place(ring, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                     Vector2.zero, new Vector2(240f, 240f));
             var ringImg = ring.gameObject.AddComponent<Image>();
             ringImg.sprite = Ui.Circle;
             ringImg.color = new Color(0.1f, 0.2f, 0.35f, 0.4f);
             ringImg.raycastTarget = false;
 
-            var knob = Ui.NewRect("knob", ring);
+            var knob = Ui.NewRect("knob", zone);
             Ui.Place(knob, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
                      Vector2.zero, new Vector2(120f, 120f));
             var knobImg = knob.gameObject.AddComponent<Image>();
@@ -86,9 +87,15 @@ namespace SnowCannon
 
         void BuildFire(RectTransform root)
         {
+            // A FIXED fire button parked at 2/3 of the screen width, low down (the same height
+            // band the cannon occupies), so it sits to the RIGHT of the cannon.
+            float cx = Screen.width * 2f / 3f;
+            float cy = 210f;
+            const float padSize = 230f;
+
             var pad = Ui.NewRect("fire_pad", root);
-            Ui.Place(pad, new Vector2(1f, 0f), new Vector2(1f, 0f),
-                      new Vector2(-150f, 150f), new Vector2(210f, 210f));
+            Ui.Place(pad, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                     new Vector2(cx, cy), new Vector2(padSize, padSize));
 
             var bg = pad.gameObject.AddComponent<Image>();
             bg.sprite = Ui.Circle;

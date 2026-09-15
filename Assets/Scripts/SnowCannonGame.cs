@@ -255,10 +255,27 @@ namespace SnowCannon
                     continue;
                 }
 
-                if (!sm.IsDying && sm.transform.position.z <= GameConfig.DefeatZ)
+                // The run ends the instant a live snowman reaches the cannon, the lake (with its
+                // grass bank), or the supply hose — not only when it crosses the defeat line. The
+                // proximity test is done here (the director owns the geometry) rather than via physics
+                // colliders, so it is deterministic and cannot be missed by a fast-moving snowman.
+                if (!sm.IsDying)
                 {
-                    GameOver(false);
-                    return;
+                    var sp = sm.transform.position;
+                    bool breach = sp.z <= GameConfig.DefeatZ;
+                    if (!breach && cannon != null)
+                    {
+                        var cp = cannon.transform.position;
+                        float rr = cannon.FootprintRadius + sm.FootprintRadius;
+                        float cdx = sp.x - cp.x, cdz = sp.z - cp.z;
+                        if (cdx * cdx + cdz * cdz <= rr * rr) breach = true;
+                    }
+                    if (!breach && lake != null && lake.TouchesSnowman(sp, sm.FootprintRadius)) breach = true;
+                    if (breach)
+                    {
+                        GameOver(false);
+                        return;
+                    }
                 }
             }
 
@@ -322,6 +339,11 @@ namespace SnowCannon
             if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) return true;
             var ts = Touchscreen.current;
             if (ts != null && ts.press != null && ts.press.wasPressedThisFrame) return true;
+            // ESC (and, on Android, the system back button, which the new Input System surfaces as
+            // the escape key) dismisses the card back to the menu. Without this the back button
+            // would fall through to Android's default "back quits the app" behaviour.
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb != null && kb.escapeKey.wasPressedThisFrame) return true;
             return false;
         }
 
@@ -341,7 +363,7 @@ namespace SnowCannon
                     "FINAL SCORE   " + score + "\n" +
                     "LEVEL REACHED   " + level + "\n\n" +
                     "HIGH SCORE   " + Settings.HighScore + "\n\n" +
-                    "tap anywhere to continue";
+                    "tap anywhere / press ESC to continue";
             }
             if (gameOverPanel != null) gameOverPanel.SetActive(true);
             gameOverCooldown = 0.5f;
@@ -379,7 +401,7 @@ namespace SnowCannon
             if (AudioDirector.Instance != null) AudioDirector.Instance.PlayPop(worldPosition);
         }
 
-        public void RegisterHit(Snowman target, int points)
+        public void RegisterHit(IHitTarget target, int points)
         {
             score += points;
             hits++;
@@ -388,7 +410,8 @@ namespace SnowCannon
 #endif
             if (AudioDirector.Instance != null)
             {
-                AudioDirector.Instance.PlayScream(target.transform.position);
+                var tr = target as Component;
+                if (tr != null) AudioDirector.Instance.PlayScream(tr.transform.position);
                 AudioDirector.Instance.Vibrate();
             }
         }

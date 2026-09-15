@@ -15,6 +15,10 @@ namespace SnowCannon
         public Vector3 MuzzleWorldPosition { get; private set; }
         public Vector3 AimDirection { get; private set; }
 
+        /// <summary>World-space radius of the cannon's footprint, used to end the run when a
+        /// snowman reaches the machine.</summary>
+        public float FootprintRadius { get { return 1.5f; } }
+
         Transform muzzle;
         Transform barrelPivot;
         Transform fanBlades;
@@ -73,14 +77,19 @@ namespace SnowCannon
         float pitch = 16f;
         const float AimYawSpeed = 95f;
         const float AimPitchSpeed = 70f;
-        const float MaxYaw = 40f;
+        // Total sweep is 160 degrees (±80). Widened from ±40 so the far-left and far-right
+        // snowmen that spawn across the whole visible width are all reachable on a phone screen.
+        const float MaxYaw = 80f;
         const float MinPitch = 4f;
         const float MaxPitch = 46f;
 
         public static Cannon Create(SnowCannonGame owner)
         {
             var go = new GameObject("Cannon");
-            go.transform.position = new Vector3(0f, 0f, -5f);
+            // The drum/pivot is authored with the bagged pedestal hanging below it (the base cube's
+            // bottom sits at local y ~ -1.03), so at y=0 the whole pedestal sank under the snow.
+            // Raise the pivot so the pedestal rests ON the ground plane (y=0) instead of half-buried.
+            go.transform.position = new Vector3(0f, 1.0f, -5f);
             var c = go.AddComponent<Cannon>();
             c.game = owner;
             c.Build();
@@ -91,7 +100,9 @@ namespace SnowCannon
         {
             var yellow = Mat.Opaque(GameConfig.CannonYellow);
             var dark = Mat.Opaque(GameConfig.CannonYellowDark);
-            var steel = Mat.Opaque(GameConfig.CannonSteel);
+            // The whole unit is painted yellow (strict requirement): the structural parts that
+            // used to be steel-grey now carry the same yellow so the cannon reads yellow end to end.
+            var steel = Mat.Opaque(GameConfig.CannonYellow);
             var fan = Mat.Opaque(new Color(0.10f, 0.11f, 0.13f, 1f));
             var bladeMat = Mat.Opaque(new Color(0.5f, 0.52f, 0.56f, 1f));
 
@@ -197,9 +208,9 @@ namespace SnowCannon
             }
 
             // The grey, curvy front shroud: a flared truncated cone like the real unit's nose,
-            // with a dark mesh face recessed behind the nozzle ring. Painted steel-grey so the
-            // muzzle end reads grey against the yellow body.
-            var shroudMat = Mat.Opaque(GameConfig.CannonSteel);
+            // with a dark mesh face recessed behind the nozzle ring. Painted yellow so the whole
+            // cannon reads yellow (the dark fan face still gives the muzzle end definition).
+            var shroudMat = Mat.Opaque(GameConfig.CannonYellow);
             var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 48),
                                 shroudMat, new Vector3(0f, 0f, 0.55f), new Vector3(90f, 0f, 0f));
             shroud.SetParent(barrelPivot, false);
