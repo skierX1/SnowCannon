@@ -1,20 +1,34 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 namespace SnowCannon
 {
     /// <summary>
-    /// On-screen controls for touch devices: a floating analogue stick on the left that
-    /// drives the cannon and a hold-to-fire pad on the right. They write straight into the
-    /// shared PlayerControls, so keyboard, mouse and touch all coexist with no mode switch.
-    /// The whole layer is hidden automatically on machines without a touchscreen.
+    /// On-screen controls for touch devices: a fixed analogue stick on the left that drives the
+    /// cannon and a hold-to-fire pad on the right. They write straight into the shared
+    /// PlayerControls, so keyboard, mouse and touch all coexist with no mode switch.
+    ///
+    /// The controls are positioned in raw screen-pixel space on a constant-pixel-size canvas and
+    /// driven directly from the Input System <c>Touchscreen</c> device (the same device the
+    /// gameplay input already proves works on the phone), rather than relying on uGUI pointer
+    /// events, which are unreliable for continuous drag on some Android builds. A single finger on
+    /// the stick and another on the fire pad are tracked independently by touch id, so you can steer
+    /// and shoot at the same time. The whole layer is skipped on machines with no touchscreen.
     /// </summary>
     public sealed class TouchControls : MonoBehaviour
     {
         PlayerControls controls;
         Canvas canvas;
+
+        // Screen-space geometry, filled in Start once the real screen size is known.
+        Vector2 stickCenter, fireCenter;
+        float stickRadius, fireRadius, travel;
+
+        RectTransform knob;
 
         public static TouchControls Attach(SnowCannonGame owner)
         {
@@ -24,11 +38,17 @@ namespace SnowCannon
             return tc;
         }
 
+        static bool HasTouchDevice()
+        {
+            if (Application.platform == RuntimePlatform.Android
+                || Application.platform == RuntimePlatform.IPhonePlayer) return true;
+            return Touchscreen.current != null;
+        }
+
         void Start()
         {
             // Desktop players use keyboard + mouse; do not clutter them with a virtual pad.
-            bool touchDevice = Touchscreen.current != null;
-            if (!touchDevice)
+            if (!HasTouchDevice())
             {
                 enabled = false;
                 return;
@@ -36,130 +56,198 @@ namespace SnowCannon
 
             Ui.EnsureEventSystem();
             canvas = Ui.CreateCanvas("TouchCanvas", 20);
+
+            // Force a 1:1 pixel canvas so the screen-pixel coordinates used below map exactly to
+            // the screen (the default ScaleWithScreenSize would scale them and push them off-screen).
+            var scaler = canvas.GetComponent<CanvasScaler>();
+            if (scaler != null)
+            {
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+                scaler.scaleFactor = 1f;
+            }
+
             var root = Ui.NewRect("root", canvas.transform);
             Ui.Stretch(root);
-            Ui.ApplySafeArea(root, canvas);
+
+            float w = Mathf.Max(1, Screen.width);
+            float h = Mathf.Max(1, Screen.height);
+            float bottomY = h * 0.16f;
+            float minDim = Mathf.Min(w, h);
+
+            stickRadius = minDim * 0.17f;
+            fireRadius = minDim * 0.15f;
+            travel = stickRadius * 0.9f;
+            stickCenter = new Vector2(w * 0.30f, bottomY);
+            fireCenter = new Vector2(w * 0.70f, bottomY);
 
             BuildStick(root);
             BuildFire(root);
+
+            var driver = gameObject.AddComponent<TouchDriver>();
+            driver.controls = controls;
+            driver.owner = this;
+            driver.travel = travel;
         }
 
         void BuildStick(RectTransform root)
         {
-            // A FIXED joystick parked at 1/3 of the screen width, low down (the same height band
-            // the cannon occupies), so it sits to the LEFT of the cannon. It is always visible
-            // rather than floating to the thumb, per the requested layout.
-            float cx = Screen.width / 3f;
-            float cy = 210f;
-            const float baseSize = 300f;
-
+            float d = stickRadius * 2f;
             var zone = Ui.NewRect("stick_zone", root);
-            Ui.Place(zone, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                     new Vector2(cx, cy), new Vector2(baseSize, baseSize));
+            // Bottom-left origin anchor: anchoredPosition is the absolute screen-pixel centre.
+            Ui.Place(zone, new Vector2(0f, 0f), new Vector2(0.5f, 0.5f), stickCenter, new Vector2(d, d));
 
             var bg = zone.gameObject.AddComponent<Image>();
             bg.sprite = Ui.Circle;
             bg.color = new Color(1f, 1f, 1f, 0.16f);
-            bg.raycastTarget = true;
+            bg.raycastTarget = false;
             bg.preserveAspect = false;
 
-            // A visible outer ring so the stick reads on a bright snowy screen.
             var ring = Ui.NewRect("ring", zone);
             Ui.Place(ring, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     Vector2.zero, new Vector2(240f, 240f));
+                     Vector2.zero, new Vector2(d * 0.8f, d * 0.8f));
             var ringImg = ring.gameObject.AddComponent<Image>();
             ringImg.sprite = Ui.Circle;
             ringImg.color = new Color(0.1f, 0.2f, 0.35f, 0.4f);
             ringImg.raycastTarget = false;
 
-            var knob = Ui.NewRect("knob", zone);
-            Ui.Place(knob, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     Vector2.zero, new Vector2(120f, 120f));
-            var knobImg = knob.gameObject.AddComponent<Image>();
+            var k = Ui.NewRect("knob", zone);
+            Ui.Place(k, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                     Vector2.zero, new Vector2(d * 0.4f, d * 0.4f));
+            var knobImg = k.gameObject.AddComponent<Image>();
             knobImg.sprite = Ui.Circle;
             knobImg.color = new Color(0.98f, 0.78f, 0.06f, 0.9f);
             knobImg.raycastTarget = false;
-
-            var stick = zone.gameObject.AddComponent<StickZone>();
-            stick.controls = controls;
-            stick.knob = knob;
+            knob = k;
         }
 
         void BuildFire(RectTransform root)
         {
-            // A FIXED fire button parked at 2/3 of the screen width, low down (the same height
-            // band the cannon occupies), so it sits to the RIGHT of the cannon.
-            float cx = Screen.width * 2f / 3f;
-            float cy = 210f;
-            const float padSize = 230f;
-
+            float d = fireRadius * 2f;
             var pad = Ui.NewRect("fire_pad", root);
-            Ui.Place(pad, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                     new Vector2(cx, cy), new Vector2(padSize, padSize));
+            Ui.Place(pad, new Vector2(0f, 0f), new Vector2(0.5f, 0.5f), fireCenter, new Vector2(d, d));
 
             var bg = pad.gameObject.AddComponent<Image>();
             bg.sprite = Ui.Circle;
             bg.color = new Color(0.98f, 0.78f, 0.06f, 0.55f);
-            bg.raycastTarget = true;
+            bg.raycastTarget = false;
             bg.preserveAspect = false;
 
             var label = Ui.AddText(pad, "label", "FIRE", 46, Color.white, TextAnchor.MiddleCenter);
             Ui.Stretch(Ui.Rt(label.gameObject));
-
-            var fire = pad.gameObject.AddComponent<FireZone>();
-            fire.controls = controls;
         }
+
+        /// <summary>Which control a screen-pixel point falls in (or None if neither).</summary>
+        public TouchControlsZone ZoneAt(Vector2 screenPos)
+        {
+            float sr = stickRadius * 1.35f;
+            float fr = fireRadius * 1.35f;
+            if ((screenPos - stickCenter).sqrMagnitude <= sr * sr) return TouchControlsZone.Stick;
+            if ((screenPos - fireCenter).sqrMagnitude <= fr * fr) return TouchControlsZone.Fire;
+            return TouchControlsZone.None;
+        }
+
+        /// <summary>Move the stick knob to a normalised offset (-1..1 on each axis).</summary>
+        public void SetKnob(Vector2 offset)
+        {
+            if (knob != null) knob.anchoredPosition = offset * travel;
+        }
+
+        public enum TouchControlsZone { None, Stick, Fire }
     }
 
-    /// <summary>A floating joystick: press anywhere in the zone, drag to steer.</summary>
-    public sealed class StickZone : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
+    /// <summary>
+    /// Reads the Input System <c>Touchscreen</c> device directly and maps each live finger to a
+    /// control zone by touch id, so the stick and the fire pad respond independently and can be used
+    /// together. This bypasses the uGUI pointer pipeline, which is unreliable for continuous drag on
+    /// some Android builds.
+    /// </summary>
+    public sealed class TouchDriver : MonoBehaviour
     {
         public PlayerControls controls;
-        public RectTransform knob;
-        Vector2 start;
-        bool active;
+        public TouchControls owner;
+        public float travel = 120f;
 
-        // Pixels of thumb travel that map to a full-magnitude move.
-        const float Travel = 130f;
-
-        public void OnPointerDown(PointerEventData e)
+        sealed class TouchState
         {
-            if (controls == null || controls.pointerBlocked) return;
-            active = true;
-            start = e.position;
+            public TouchControls.TouchControlsZone zone;
+            public Vector2 downPos;
         }
 
-        public void OnDrag(PointerEventData e)
+        readonly Dictionary<int, TouchState> active = new Dictionary<int, TouchState>();
+        readonly List<int> live = new List<int>();
+
+        void Update()
         {
-            if (!active || controls == null || controls.pointerBlocked) return;
-            Vector2 d = (e.position - start) / Travel;
-            Vector2 clamped = Vector2.ClampMagnitude(d, 1f);
-            controls.touchMove = clamped;
-            // Slide the knob with the thumb, clamped to the base radius.
-            if (knob != null) knob.anchoredPosition = clamped * Travel;
+            if (controls == null || owner == null) return;
+
+            var ts = Touchscreen.current;
+            if (ts == null || controls.pointerBlocked)
+            {
+                ReleaseAll();
+                return;
+            }
+
+            live.Clear();
+            var touches = ts.touches;
+            for (int i = 0; i < touches.Count; i++)
+            {
+                var t = touches[i];
+                if (t == null || !t.isInProgress) continue;
+                int id = t.touchId.ReadValue();
+                Vector2 pos = t.position.ReadValue();
+                live.Add(id);
+
+                if (!active.TryGetValue(id, out var st))
+                {
+                    var zone = owner.ZoneAt(pos);
+                    if (zone == TouchControls.TouchControlsZone.None) continue;
+                    st = new TouchState { zone = zone, downPos = pos };
+                    active[id] = st;
+                    if (zone == TouchControls.TouchControlsZone.Fire) controls.touchFireHeld = true;
+                }
+
+                if (st.zone == TouchControls.TouchControlsZone.Stick)
+                {
+                    Vector2 d = (pos - st.downPos) / travel;
+                    Vector2 clamped = Vector2.ClampMagnitude(d, 1f);
+                    controls.touchMove = clamped;
+                    owner.SetKnob(clamped);
+                }
+            }
+
+            // Release any tracked touch that is no longer live.
+            if (active.Count > 0)
+            {
+                keysScratch.Clear();
+                foreach (var kv in active) keysScratch.Add(kv.Key);
+                for (int i = 0; i < keysScratch.Count; i++)
+                {
+                    int id = keysScratch[i];
+                    if (live.Contains(id)) continue;
+                    var st = active[id];
+                    if (st.zone == TouchControls.TouchControlsZone.Stick)
+                    {
+                        controls.touchMove = Vector2.zero;
+                        owner.SetKnob(Vector2.zero);
+                    }
+                    else if (st.zone == TouchControls.TouchControlsZone.Fire)
+                    {
+                        controls.touchFireHeld = false;
+                    }
+                    active.Remove(id);
+                }
+            }
         }
 
-        public void OnPointerUp(PointerEventData e)
-        {
-            active = false;
-            if (controls != null) controls.touchMove = Vector2.zero;
-            if (knob != null) knob.anchoredPosition = Vector2.zero;
-        }
-    }
+        readonly List<int> keysScratch = new List<int>();
 
-    /// <summary>A hold-to-fire pad.</summary>
-    public sealed class FireZone : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
-    {
-        public PlayerControls controls;
-
-        public void OnPointerDown(PointerEventData e)
+        void ReleaseAll()
         {
-            if (controls != null && !controls.pointerBlocked) controls.touchFireHeld = true;
-        }
-
-        public void OnPointerUp(PointerEventData e)
-        {
-            if (controls != null) controls.touchFireHeld = false;
+            if (active.Count == 0) return;
+            controls.touchMove = Vector2.zero;
+            controls.touchFireHeld = false;
+            owner.SetKnob(Vector2.zero);
+            active.Clear();
         }
     }
 }

@@ -30,6 +30,10 @@ namespace SnowCannon
         /// <summary>True while a modal panel owns the pointer, so clicks must not fire.</summary>
         public bool pointerBlocked;
 
+        // Cached once: the desktop mouse needs a higher gain to feel responsive on a big screen.
+        static readonly bool s_desktop = Application.platform != RuntimePlatform.Android
+                                       && Application.platform != RuntimePlatform.IPhonePlayer;
+
         public PlayerControls()
         {
             asset = ScriptableObject.CreateInstance<InputActionAsset>();
@@ -104,7 +108,9 @@ namespace SnowCannon
                 mouse = md.delta.ReadValue();
             else
                 mouse = lookDelta.ReadValue<Vector2>();
-            mouse *= Settings.MouseSensitivity * 0.06f;
+            // On desktop (Windows) triple the mouse gain so the cannon tracks the pointer briskly;
+            // touch devices keep the tuned 1x so the stick and swipe stay comfortable.
+            mouse *= Settings.MouseSensitivity * 0.06f * (s_desktop ? 3f : 1f);
             if (Settings.InvertY) mouse.y = -mouse.y;
             // A resting hand must never make the cannon creep.
             if (mouse.sqrMagnitude < 0.0004f) mouse = Vector2.zero;
