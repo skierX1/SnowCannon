@@ -57,12 +57,31 @@ namespace SnowCannon
 
             var bg = zone.gameObject.AddComponent<Image>();
             bg.sprite = Ui.Circle;
-            bg.color = new Color(1f, 1f, 1f, 0.06f);
+            // A faint but clearly visible disc so the player can see where the stick lives.
+            bg.color = new Color(1f, 1f, 1f, 0.16f);
             bg.raycastTarget = true;
             bg.preserveAspect = false;
 
+            // A visible outer ring + inner knob so the stick reads on a bright snowy screen.
+            var ring = Ui.NewRect("ring", zone);
+            Ui.Place(ring, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                     new Vector2(150f, 150f), new Vector2(240f, 240f));
+            var ringImg = ring.gameObject.AddComponent<Image>();
+            ringImg.sprite = Ui.Circle;
+            ringImg.color = new Color(0.1f, 0.2f, 0.35f, 0.4f);
+            ringImg.raycastTarget = false;
+
+            var knob = Ui.NewRect("knob", ring);
+            Ui.Place(knob, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                     Vector2.zero, new Vector2(120f, 120f));
+            var knobImg = knob.gameObject.AddComponent<Image>();
+            knobImg.sprite = Ui.Circle;
+            knobImg.color = new Color(0.98f, 0.78f, 0.06f, 0.9f);
+            knobImg.raycastTarget = false;
+
             var stick = zone.gameObject.AddComponent<StickZone>();
             stick.controls = controls;
+            stick.knob = knob;
         }
 
         void BuildFire(RectTransform root)
@@ -89,6 +108,7 @@ namespace SnowCannon
     public sealed class StickZone : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
     {
         public PlayerControls controls;
+        public RectTransform knob;
         Vector2 start;
         bool active;
 
@@ -106,13 +126,17 @@ namespace SnowCannon
         {
             if (!active || controls == null || controls.pointerBlocked) return;
             Vector2 d = (e.position - start) / Travel;
-            controls.touchMove = Vector2.ClampMagnitude(d, 1f);
+            Vector2 clamped = Vector2.ClampMagnitude(d, 1f);
+            controls.touchMove = clamped;
+            // Slide the knob with the thumb, clamped to the base radius.
+            if (knob != null) knob.anchoredPosition = clamped * Travel;
         }
 
         public void OnPointerUp(PointerEventData e)
         {
             active = false;
             if (controls != null) controls.touchMove = Vector2.zero;
+            if (knob != null) knob.anchoredPosition = Vector2.zero;
         }
     }
 

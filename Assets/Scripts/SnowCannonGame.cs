@@ -33,6 +33,7 @@ namespace SnowCannon
         Text levelText;
         Text timeText;
         Text scoreText;
+        Text waterText;
 
         GameObject gameOverPanel;
         Text finalScoreText;
@@ -78,6 +79,15 @@ namespace SnowCannon
 
             cannon = Cannon.Create(this);
             TouchControls.Attach(this);
+
+            // The 3D water pond lives in the world (bottom-left of the field) and feeds the cannon
+            // through a yellow hose that runs along the bottom of the screen.
+            lake = Lake.Create(transform, cam);
+            if (lake != null && cannon != null) lake.ConnectHose(cannon.transform.position);
+
+            // Give the solid props a soft ground shadow; keep the water and text decals out of it.
+            if (cannon != null) Mat.SetShadows(cannon.gameObject, true, false);
+            if (lake != null) Mat.SetShadows(lake.gameObject, false, false);
 
             GameSession.BeginRun();
             level = 1;
@@ -136,13 +146,14 @@ namespace SnowCannon
             cam.enabled = true;
             FitCamera();
 
-            // A soft sun. Shadows are left off; the field is bright and flat on purpose.
+            // A soft sun that casts a gentle ground shadow under the props.
             var sunGo = new GameObject("Sun");
             var sun = sunGo.AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.intensity = 1.15f;
             sun.color = new Color(1f, 0.98f, 0.92f, 1f);
-            sun.shadows = LightShadows.None;
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.32f;
             sunGo.transform.rotation = Quaternion.Euler(new Vector3(52f, -18f, 0f));
 
             // The snow field: one huge textured plane under the whole play area.
@@ -167,6 +178,9 @@ namespace SnowCannon
 
             // A whisper of atmosphere: sparse flakes and a few faint drifting clouds.
             Weather.Attach(transform);
+
+            // Decorative cross-country skiers cruising the far background, behind the spawn line.
+            SkierManager.Attach(transform, cam);
         }
 
         /// <summary>Frames the field for both landscape and portrait screens.</summary>
@@ -257,19 +271,22 @@ namespace SnowCannon
             float speed = Random.Range(GameConfig.SnowmanMinSpeed, GameConfig.SnowmanMaxSpeed)
                           * (1f + (level - 1) * 0.20f);
 
-            // Deal spawns out across the field in round-robin lanes (with a little jitter inside
-            // each lane) so the wave is spread over the whole width instead of clumping in the
-            // middle the way pure chance does.
-            int lane = spawnLane % SpawnLanes;
-            spawnLane++;
-            float usable = GameConfig.FieldHalfWidth - 1.5f;
-            float laneW = (usable * 2f) / SpawnLanes;
-            float x = -usable + laneW * (lane + 0.5f) + Random.Range(-laneW * 0.32f, laneW * 0.32f);
-            x = Mathf.Clamp(x, -usable, usable);
-
             // A small depth stagger so the far wave fans across the screen instead of collapsing
             // into one straight line (which perspective squeezes toward the centre).
             float z = GameConfig.SpawnZ - Random.Range(0f, 3.5f);
+
+            // Deal spawns out across the field in round-robin lanes (with a little jitter inside
+            // each lane). The usable width is the field that is actually VISIBLE at this depth,
+            // not the fixed logical half-width: because the camera is a pinhole, the far spawn
+            // depth projects the logical field into only a narrow slice of the screen, so using
+            // the visible half-width is what truly spreads the wave over the whole screen width.
+            int lane = spawnLane % SpawnLanes;
+            spawnLane++;
+            float visibleHalf = GameConfig.VisibleHalfWidthAtZ(cam, z);
+            float usable = Mathf.Max(2f, visibleHalf - 1.2f);
+            float laneW = (usable * 2f) / SpawnLanes;
+            float x = -usable + laneW * (lane + 0.5f) + Random.Range(-laneW * 0.32f, laneW * 0.32f);
+            x = Mathf.Clamp(x, -usable, usable);
 
             // A healthy base diagonal so they never look like they only march straight down.
             var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 16f + (level - 1) * 4f));
@@ -385,18 +402,16 @@ namespace SnowCannon
             var root = Ui.NewRect("root", canvas.transform);
             Ui.Stretch(root);
 
-            // The water lake in the bottom-left corner: the cannon's ammunition gauge.
-            lake = Lake.Create(root);
-
             // Top-right scoreboard.
             var board = Ui.NewRect("board", root);
             Ui.Place(board, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                      new Vector2(-24f, -24f), new Vector2(320f, 210f));
+                      new Vector2(-24f, -24f), new Vector2(320f, 250f));
             Ui.AddPanel(board, "bg", new Color(0f, 0f, 0f, 0.32f), false);
 
             levelText = AddLine(board, "level", 34, new Vector2(-16f, -34f));
             timeText = AddLine(board, "time", 46, new Vector2(-16f, -84f));
             scoreText = AddLine(board, "score", 34, new Vector2(-16f, -140f));
+            waterText = AddLine(board, "water", 30, new Vector2(-16f, -188f));
 
             // Centre game-over card, hidden until the run ends.
             var over = Ui.NewRect("gameover", root);
@@ -437,6 +452,14 @@ namespace SnowCannon
             levelText.text = "LEVEL  " + level;
             timeText.text = Mathf.CeilToInt(Mathf.Max(0f, levelTimer)).ToString();
             scoreText.text = "SCORE  " + score;
+            if (waterText != null && lake != null)
+            {
+                int m = lake.Marks;
+                waterText.text = "WATER  " + m + " / " + GameConfig.LakeMaxMarks;
+                waterText.color = m <= 0 ? new Color(1f, 0.4f, 0.36f, 1f)
+                             : m <= 10 ? new Color(1f, 0.82f, 0.32f, 1f)
+                             : Color.white;
+            }
         }
 
         // ---- debug hooks used by the editor smoke test -------------------------

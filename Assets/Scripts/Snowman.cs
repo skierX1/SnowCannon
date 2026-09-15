@@ -35,6 +35,14 @@ namespace SnowCannon
         float size = 1f;
         float swayPhase;
 
+        // The hinged lower jaw that opens and closes at random while the snowman marches.
+        Transform jaw;
+        float jawPhase, jawTimer, jawOpen;
+        // 0 = pot, 1 = icicles, 2 = punk mohawk, 3 = shaggy snow afro. Chosen per snowman.
+        int hairStyle;
+        // 0 = outward burst, 1 = confetti pop, 2 = collapse down, 3 = tornado spin.
+        int deathStyle;
+
         // Travel heading, in degrees off straight-ahead (0 = straight at the camera, + = to the
         // right). Chosen at random up to MaxAngle and reflected off the side walls and off other
         // snowmen, so the march is a random diagonal that always stays inside the field.
@@ -63,6 +71,7 @@ namespace SnowCannon
             // A random diagonal heading, up to maxAngleDeg off straight-ahead.
             sm.maxAngle = Mathf.Clamp(maxAngleDeg, 0f, 30f);
             sm.headingDeg = Random.Range(-sm.maxAngle, sm.maxAngle);
+            sm.deathStyle = Random.Range(0, 4);
             sm.Build();
             all.Add(sm);
             return sm;
@@ -108,20 +117,13 @@ namespace SnowCannon
                                    new Vector3(-90f, 0f, 0f));
             nose.localScale = new Vector3(1f, 1f, 1f);
 
-            // Coal mouth dots.
-            for (int i = -2; i <= 2; i++)
-            {
-                AddSphere("mouth" + i, coal,
-                          new Vector3(i * Rt * 0.24f, Yt - Rt * 0.34f, -Rt * 0.82f),
-                          Rt * 0.10f);
-            }
+            // An animated mouth: a dark cavity, a gappy row of upper teeth, and a hinged lower
+            // jaw that opens and closes at random while the snowman marches.
+            BuildMouth(coal);
 
-            // Pot hat: a bucket worn upside down, so the wide mouth faces up.
-            float potBase = Yt + Rt * 0.86f;
-            AddMeshPart("pot", MeshFactory.TruncatedCone(Rt * 0.55f, Rt * 0.86f, Rt * 0.9f, 14), pot,
-                        new Vector3(0, potBase, 0), Vector3.one, Vector3.zero);
-            AddMeshPart("pot_rim", MeshFactory.TruncatedCone(Rt * 0.92f, Rt * 0.86f, Rt * 0.16f, 14), pot,
-                        new Vector3(0, potBase + Rt * 0.86f, 0), Vector3.one, Vector3.zero);
+            // A per-snowman hair style: the classic pot, or icicles, a punk mohawk, or a shaggy
+            // snow afro, so the field never reads as a row of identical snowmen.
+            BuildHair(pot);
 
             // Branch arms with hands, rooted in the middle ball and angled up and outward.
             BuildArm("arm_l", branch, new Vector3(-Rm * 0.5f, Ym + Rm * 0.1f, 0), -1f);
@@ -138,6 +140,119 @@ namespace SnowCannon
 
             transform.localScale = Vector3.one * size;
             HeadWorldY = transform.position.y + Yt * size;
+            Mat.SetShadows(gameObject, true, false);
+        }
+
+        void BuildMouth(Material coal)
+        {
+            var tooth = Mat.Opaque(new Color(0.96f, 0.97f, 1f, 1f));
+            Register(tooth);
+            float my = Yt - Rt * 0.30f;      // mouth centre height
+            float mz = -Rt * 0.86f;           // front of the face
+            float mw = Rt * 0.62f;             // half width of the mouth
+
+            // Dark open cavity behind the teeth.
+            AddMeshPart("mouth_cavity", MeshFactory.TruncatedCone(Rt * 0.02f, mw * 0.9f, Rt * 0.18f, 12), coal,
+                        new Vector3(0, my, mz + Rt * 0.05f), Vector3.one, new Vector3(90f, 0f, 0f));
+
+            // Upper teeth: a row of small boxes, a couple randomly missing for a gappy grin.
+            int teeth = 5;
+            var miss = new bool[teeth];
+            int missing = Random.Range(0, 3);
+            for (int k = 0; k < missing; k++) miss[Random.Range(0, teeth)] = true;
+            for (int i = 0; i < teeth; i++)
+            {
+                if (miss[i]) continue;
+                float tx = Mathf.Lerp(-mw, mw, (i + 0.5f) / teeth);
+                AddMeshPart("tooth_u" + i, MeshFactory.TruncatedCone(0.03f, 0.02f, Rt * 0.14f, 6), tooth,
+                            new Vector3(tx, my + Rt * 0.10f, mz), Vector3.one, Vector3.zero);
+            }
+
+            // Lower jaw: a pivot at the back of the mouth that swings the lower lip + teeth open.
+            var pivot = new GameObject("jaw").transform;
+            pivot.SetParent(transform, false);
+            pivot.localPosition = new Vector3(0, my - Rt * 0.02f, mz + Rt * 0.2f);
+            jaw = pivot;
+            AddMeshPartTo(pivot, "lower_lip", MeshFactory.TruncatedCone(0.03f, mw * 0.8f, Rt * 0.12f, 12), coal,
+                          new Vector3(0, -Rt * 0.06f, -Rt * 0.16f), Vector3.one, new Vector3(-90f, 0f, 0f));
+            for (int i = 0; i < 3; i++)
+            {
+                float tx = Mathf.Lerp(-mw * 0.7f, mw * 0.7f, (i + 0.5f) / 3);
+                AddMeshPartTo(pivot, "tooth_l" + i, MeshFactory.TruncatedCone(0.028f, 0.018f, Rt * 0.1f, 6), tooth,
+                              new Vector3(tx, Rt * 0.02f, -Rt * 0.14f), Vector3.one, Vector3.zero);
+            }
+        }
+
+        void BuildHair(Material pot)
+        {
+            hairStyle = Random.Range(0, 4);
+            float crown = Yt + Rt * 0.86f;
+            switch (hairStyle)
+            {
+                case 1: // icicles hanging off the crown
+                {
+                    var ice = Mat.Opaque(new Color(0.72f, 0.88f, 1f, 0.9f));
+                    Register(ice);
+                    int n = Random.Range(5, 9);
+                    for (int i = 0; i < n; i++)
+                    {
+                        float a = (i / (float)n) * Mathf.PI * 2f;
+                        float rr = Rt * Random.Range(0.5f, 0.85f);
+                        float len = Rt * Random.Range(0.5f, 1.1f);
+                        AddMeshPart("icicle" + i, MeshFactory.TruncatedCone(Rt * 0.12f, 0f, len, 7), ice,
+                                    new Vector3(Mathf.Cos(a) * rr, crown, Mathf.Sin(a) * rr), Vector3.one,
+                                    new Vector3(180f, 0f, 0f));
+                    }
+                    break;
+                }
+                case 2: // punk mohawk: a line of upward spikes
+                {
+                    var spikeMat = Mat.Opaque(GameConfig.PotColors[Random.Range(0, GameConfig.PotColors.Length)]);
+                    Register(spikeMat);
+                    int n = Random.Range(5, 8);
+                    for (int i = 0; i < n; i++)
+                    {
+                        float z = Mathf.Lerp(-Rt * 0.7f, Rt * 0.7f, (i + 0.5f) / n);
+                        float h = Rt * Random.Range(0.7f, 1.3f);
+                        AddMeshPart("spike" + i, MeshFactory.TruncatedCone(Rt * 0.16f, 0f, h, 7), spikeMat,
+                                    new Vector3(0, crown, z), Vector3.one, Vector3.zero);
+                    }
+                    break;
+                }
+                case 3: // a shaggy snow afro
+                {
+                    var afro = Mat.SnowMaterial(Random.Range(0, 6));
+                    Register(afro);
+                    AddMeshPart("afro", MeshFactory.LumpySphere(MeshFactory.UVSphere(10, 14), 0.06f, 3.3f), afro,
+                                new Vector3(0, crown + Rt * 0.1f, 0),
+                                new Vector3(Rt * 2.1f, Rt * 1.5f, Rt * 2.1f), Vector3.zero);
+                    break;
+                }
+                default: // the classic pot bucket
+                {
+                    AddMeshPart("pot", MeshFactory.TruncatedCone(Rt * 0.55f, Rt * 0.86f, Rt * 0.9f, 14), pot,
+                                new Vector3(0, crown, 0), Vector3.one, Vector3.zero);
+                    AddMeshPart("pot_rim", MeshFactory.TruncatedCone(Rt * 0.92f, Rt * 0.86f, Rt * 0.16f, 14), pot,
+                                new Vector3(0, crown + Rt * 0.86f, 0), Vector3.one, Vector3.zero);
+                    break;
+                }
+            }
+        }
+
+        Transform AddMeshPartTo(Transform parent, string name, Mesh mesh, Material mat,
+                                Vector3 localPos, Vector3 scale, Vector3 localEuler)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale = scale;
+            go.transform.localEulerAngles = localEuler;
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            var r = go.AddComponent<MeshRenderer>();
+            r.material = mat;
+            Track(go, mat);
+            return go.transform;
         }
 
         void BuildArm(string name, Material mat, Vector3 shoulder, float side)
@@ -260,8 +375,11 @@ namespace SnowCannon
             Vector3 dir = new Vector3(Mathf.Sin(rad), 0f, -Mathf.Cos(rad));
             p += dir * (Speed * Time.deltaTime);
 
-            // Bounce off the side walls so a snowman always stays inside the screen.
-            float limit = GameConfig.FieldHalfWidth - 0.6f * size;
+            // Bounce off the visible screen edges so a snowman always stays on screen. The limit
+            // is the field width that is actually visible at THIS depth (the camera is a pinhole,
+            // so the far rows are narrower on screen than the near rows), which makes them reflect
+            // right at the edge of the display instead of at an invisible logical boundary.
+            float limit = GameConfig.VisibleHalfWidthAtZ(Camera.main, p.z) - 0.6f * size;
             if (p.x <= -limit) { p.x = -limit; headingDeg = -headingDeg; }
             else if (p.x >= limit) { p.x = limit; headingDeg = -headingDeg; }
 
@@ -276,6 +394,19 @@ namespace SnowCannon
             swayPhase += Time.deltaTime * 3.4f;
             float yaw = Mathf.Sin(swayPhase) * 9.1f - headingDeg * 0.6f;
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+
+            // The mouth opens and closes at random while the snowman marches.
+            if (jaw != null)
+            {
+                jawTimer -= Time.deltaTime;
+                if (jawTimer <= 0f)
+                {
+                    jawTimer = Random.Range(0.5f, 2.2f);
+                    jawOpen = Random.value < 0.55f ? Random.Range(0.15f, 1f) : 0f;
+                }
+                jawPhase = Mathf.MoveTowards(jawPhase, jawOpen, Time.deltaTime * 6f);
+                jaw.localEulerAngles = new Vector3(-jawPhase * 34f, 0f, 0f);
+            }
 
             // The bottom ball rolls: omega = v / r, about the axis perpendicular to travel.
             if (bottomBall != null)
@@ -344,17 +475,34 @@ namespace SnowCannon
             IsDying = true;
             fadeTimer = 0f;
 
-            // Detach every part and fling it so the stack visibly collapses.
+            // Detach every part and fling it so the stack visibly collapses. The fling style is
+            // picked per snowman so different ones die in different ways.
             foreach (var c in chunks)
             {
                 c.detached = true;
                 c.transform.SetParent(null, true);
-                c.velocity = new Vector3(Random.Range(-1.6f, 1.6f),
-                                         Random.Range(1.4f, 3.4f),
-                                         Random.Range(-0.6f, 2.2f));
-                c.angularVelocity = new Vector3(Random.Range(-260f, 260f),
-                                                Random.Range(-260f, 260f),
-                                                Random.Range(-260f, 260f));
+                Vector3 v, av;
+                switch (deathStyle)
+                {
+                    case 1: // confetti pop straight up
+                        v = new Vector3(Random.Range(-1.2f, 1.2f), Random.Range(3.5f, 6f), Random.Range(-0.5f, 1.5f));
+                        av = new Vector3(Random.Range(-420f, 420f), Random.Range(-420f, 420f), Random.Range(-420f, 420f));
+                        break;
+                    case 2: // collapse down with a low bounce
+                        v = new Vector3(Random.Range(-0.8f, 0.8f), Random.Range(0.4f, 1.4f), Random.Range(-0.4f, 1.2f));
+                        av = new Vector3(Random.Range(-120f, 120f), Random.Range(-120f, 120f), Random.Range(-120f, 120f));
+                        break;
+                    case 3: // tornado spin
+                        v = new Vector3(Random.Range(-2.2f, 2.2f), Random.Range(2f, 4f), Random.Range(-1f, 2f));
+                        av = new Vector3(Random.Range(-600f, 600f), Random.Range(-600f, 600f), Random.Range(-600f, 600f));
+                        break;
+                    default: // classic outward burst
+                        v = new Vector3(Random.Range(-1.6f, 1.6f), Random.Range(1.4f, 3.4f), Random.Range(-0.6f, 2.2f));
+                        av = new Vector3(Random.Range(-260f, 260f), Random.Range(-260f, 260f), Random.Range(-260f, 260f));
+                        break;
+                }
+                c.velocity = v;
+                c.angularVelocity = av;
             }
             return true;
         }

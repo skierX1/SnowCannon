@@ -38,3 +38,11 @@ Thumbs.db
 GhiThumbs.db
 *.swp
 Build_Win64
+Build_Android
+Build_iOS
+Build_aab
+/[Bb]uild_[Aa]ndroid/
+/[Bb]uild_[Ii][Oo][Ss]/
+/[Bb]uild_[Aa][Aa][Bb]/
+.utmp/
+/[Uu]tils/[Aa]ndroid/

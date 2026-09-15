@@ -17,6 +17,7 @@ namespace SnowCannon
 
         static Sprite s_white;
         static Sprite s_circle;
+        static Sprite s_rounded;
 
         public static Sprite White
         {
@@ -26,6 +27,12 @@ namespace SnowCannon
         public static Sprite Circle
         {
             get { if (s_circle == null) s_circle = TextureFactory.CircleSprite(1.7f); return s_circle; }
+        }
+
+        /// <summary>A 9-sliced rounded rectangle for buttons and panels.</summary>
+        public static Sprite Rounded
+        {
+            get { if (s_rounded == null) s_rounded = TextureFactory.RoundedRectSprite(); return s_rounded; }
         }
 
         static Font s_font;
@@ -158,22 +165,65 @@ namespace SnowCannon
             return t;
         }
 
-        /// <summary>A rounded-looking button: a soft disc behind a label.</summary>
+/// <summary>A light, rounded button: a soft drop-shadow behind a rounded panel, a subtle
+        /// top highlight for a gentle bevel, and a centred label. It brightens on hover and dips on
+        /// press so it feels tactile on both mouse and touch.</summary>
         public static Button AddButton(RectTransform parent, string name, string label,
-                                       Vector2 size, int fontSize, Color background, Action onClick)
+                                      Vector2 size, int fontSize, Color background, Action onClick)
         {
             var rt = NewRect(name, parent);
             rt.sizeDelta = size;
 
+            // Soft drop-shadow, offset down-left a touch.
+            var shadow = NewRect("shadow", rt);
+            shadow.anchorMin = Vector2.zero; shadow.anchorMax = Vector2.one;
+            shadow.offsetMin = new Vector2(-4f, -8f);
+            shadow.offsetMax = new Vector2(4f, -2f);
+            var shImg = shadow.gameObject.AddComponent<Image>();
+            shImg.sprite = Rounded;
+            shImg.color = new Color(0f, 0f, 0.06f, 0.28f);
+            shImg.raycastTarget = false;
+
+            // The button body. Menu buttons read better as a translucent glass panel than as a
+            // solid slab, so we keep the caller's hue but drop the fill's opacity and let the scene
+            // show through. The hover/press tint below is derived from this same translucent base.
             var bg = rt.gameObject.AddComponent<Image>();
-            bg.sprite = Circle;
-            bg.color = background;
+            bg.sprite = Rounded;
+            Color body = background;
+            body.a *= 0.55f;
+            bg.color = body;
             bg.raycastTarget = true;
             bg.preserveAspect = false;
 
+            // A faint lighter cap along the top edge for a soft bevel.
+            var gloss = NewRect("gloss", rt);
+            gloss.anchorMin = new Vector2(0f, 0.5f); gloss.anchorMax = new Vector2(1f, 1f);
+            gloss.offsetMin = new Vector2(6f, 0f); gloss.offsetMax = new Vector2(-6f, -3f);
+            var glImg = gloss.gameObject.AddComponent<Image>();
+            glImg.sprite = Rounded;
+            glImg.color = new Color(1f, 1f, 1f, 0.16f);
+            glImg.raycastTarget = false;
+
             var btn = rt.gameObject.AddComponent<Button>();
+            btn.targetGraphic = bg;
+            btn.transition = Selectable.Transition.ColorTint;
+            var c = bg.color;
+            btn.colors = new ColorBlock
+            {
+                normalColor = c,
+                highlightedColor = Color.Lerp(c, Color.white, 0.22f),
+                pressedColor = Color.Lerp(c, Color.black, 0.14f),
+                selectedColor = c,
+                disabledColor = new Color(c.r, c.g, c.b, 0.5f),
+                colorMultiplier = 1f
+            };
+
             var labelTxt = AddText(rt, "label", label, fontSize, Color.white, TextAnchor.MiddleCenter);
             Stretch(labelTxt.rectTransform);
+            // A subtle text shadow so the label stays legible on the light fills.
+            var txtShadow = labelTxt.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+            txtShadow.effectColor = new Color(0f, 0f, 0.08f, 0.4f);
+            txtShadow.effectDistance = new Vector2(0f, -2f);
 
             if (onClick != null) btn.onClick.AddListener(() => onClick());
             return btn;

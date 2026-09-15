@@ -149,6 +149,121 @@ namespace SnowCannon
             return m;
         }
 
+        /// <summary>A flat disc in the XZ plane (y = 0) built from a centre vertex plus concentric
+        /// rings, so its vertices can be pushed up and down each frame to make a rippling water
+        /// surface. Double-sided materials are recommended (the winding is not guaranteed).</summary>
+        public static Mesh WaveDisc(float radius, int rings, int segments)
+        {
+            rings = Mathf.Max(1, rings);
+            segments = Mathf.Max(6, segments);
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+
+            verts.Add(Vector3.zero);
+            norms.Add(Vector3.up);
+            uvs.Add(new Vector2(0.5f, 0.5f));
+
+            for (int r = 1; r <= rings; r++)
+            {
+                float rr = radius * (r / (float)rings);
+                for (int s = 0; s < segments; s++)
+                {
+                    float th = Mathf.PI * 2f * (s / (float)segments);
+                    float cx = Mathf.Cos(th), sz = Mathf.Sin(th);
+                    verts.Add(new Vector3(cx * rr, 0f, sz * rr));
+                    norms.Add(Vector3.up);
+                    uvs.Add(new Vector2(0.5f + cx * 0.5f, 0.5f + sz * 0.5f));
+                }
+            }
+
+            for (int s = 0; s < segments; s++)
+            {
+                int a = 1 + s;
+                int b = 1 + (s + 1) % segments;
+                tris.Add(0); tris.Add(b); tris.Add(a);
+            }
+            for (int r = 1; r < rings; r++)
+            {
+                int cur = 1 + (r - 1) * segments;
+                int nxt = 1 + r * segments;
+                for (int s = 0; s < segments; s++)
+                {
+                    int s2 = (s + 1) % segments;
+                    int a = cur + s, b = cur + s2, c = nxt + s, e = nxt + s2;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+
+            var m = new Mesh { name = "wave_disc" };
+            m.SetVertices(verts);
+            m.SetNormals(norms);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(tris, 0, false);
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>A smooth tube swept along a polyline path, used for the water hose. Each path
+        /// point gets a radial ring of vertices oriented by a stable frame, and consecutive rings
+        /// are stitched with quads.</summary>
+        public static Mesh TubeAlongPath(List<Vector3> pts, float radius, int radialSegs)
+        {
+            radialSegs = Mathf.Max(4, radialSegs);
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            int n = pts.Count;
+            if (n < 2) return new Mesh { name = "tube_path_empty" };
+
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 p = pts[i];
+                Vector3 tangent;
+                if (i == 0) tangent = pts[1] - pts[0];
+                else if (i == n - 1) tangent = pts[n - 1] - pts[n - 2];
+                else tangent = pts[i + 1] - pts[i - 1];
+                if (tangent.sqrMagnitude < 0.0001f) tangent = Vector3.forward;
+                tangent.Normalize();
+
+                Vector3 refUp = Mathf.Abs(Vector3.Dot(tangent, Vector3.up)) > 0.95f ? Vector3.forward : Vector3.up;
+                Vector3 normal = Vector3.Cross(refUp, tangent).normalized;
+                Vector3 binormal = Vector3.Cross(tangent, normal).normalized;
+
+                for (int s = 0; s <= radialSegs; s++)
+                {
+                    float th = Mathf.PI * 2f * (s / (float)radialSegs);
+                    Vector3 dir = normal * Mathf.Cos(th) + binormal * Mathf.Sin(th);
+                    verts.Add(p + dir * radius);
+                    norms.Add(dir);
+                    uvs.Add(new Vector2(s / (float)radialSegs, i / (float)(n - 1)));
+                }
+            }
+
+            int ring = radialSegs + 1;
+            for (int i = 0; i < n - 1; i++)
+            {
+                for (int s = 0; s < radialSegs; s++)
+                {
+                    int a = i * ring + s, b = a + 1, c = a + ring, e = c + 1;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+
+            var mesh = new Mesh { name = "tube_path" };
+            mesh.SetVertices(verts);
+            mesh.SetNormals(norms);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(tris, 0, false);
+            mesh.RecalculateBounds();
+            mesh.RecalculateTangents();
+            return mesh;
+        }
+
         /// <summary>A cone frustum standing on y = 0. radiusTop may be 0 for a sharp tip.</summary>
         public static Mesh TruncatedCone(float radiusBottom, float radiusTop, float height, int segments)
         {
@@ -228,6 +343,134 @@ namespace SnowCannon
             mesh.RecalculateBounds();
             mesh.RecalculateTangents();
             return mesh;
+        }
+
+        /// <summary>A smooth, seed-stable radial multiplier (periodic in the angle) that turns the
+        /// pond's circular parts into one organic, blobby outline. Every pond piece shares the same
+        /// seed so their edges nest perfectly, giving an irregular, natural shoreline.</summary>
+        public static float OrganicRadius(float angle, float seed, float amp)
+        {
+            return 1f
+                 + amp * Mathf.Sin(2f * angle + seed)
+                 + amp * 0.55f * Mathf.Sin(3f * angle + seed * 1.7f + 1.3f)
+                 + amp * 0.35f * Mathf.Sin(5f * angle + seed * 0.6f + 2.1f);
+        }
+
+        /// <summary>A flat, blobby disc in the XZ plane (y = 0) whose radius follows the organic
+        /// profile. Built from a centre vertex plus concentric rings so its vertices can be pushed
+        /// up and down each frame to ripple the water.</summary>
+        public static Mesh WaveDiscOrganic(float radius, int rings, int segments, float seed, float amp)
+        {
+            rings = Mathf.Max(1, rings);
+            segments = Mathf.Max(8, segments);
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+
+            verts.Add(Vector3.zero); norms.Add(Vector3.up); uvs.Add(new Vector2(0.5f, 0.5f));
+            for (int r = 1; r <= rings; r++)
+            {
+                float rr = radius * (r / (float)rings);
+                for (int s = 0; s < segments; s++)
+                {
+                    float th = Mathf.PI * 2f * (s / (float)segments);
+                    float k = OrganicRadius(th, seed, amp);
+                    float cx = Mathf.Cos(th), sz = Mathf.Sin(th);
+                    verts.Add(new Vector3(cx * rr * k, 0f, sz * rr * k));
+                    norms.Add(Vector3.up);
+                    uvs.Add(new Vector2(0.5f + cx * 0.5f, 0.5f + sz * 0.5f));
+                }
+            }
+            for (int s = 0; s < segments; s++)
+            {
+                int a = 1 + s;
+                int b = 1 + (s + 1) % segments;
+                tris.Add(0); tris.Add(b); tris.Add(a);
+            }
+            for (int r = 1; r < rings; r++)
+            {
+                int cur = 1 + (r - 1) * segments;
+                int nxt = 1 + r * segments;
+                for (int s = 0; s < segments; s++)
+                {
+                    int s2 = (s + 1) % segments;
+                    int a = cur + s, b = cur + s2, c = nxt + s, e = nxt + s2;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+            }
+            var m = new Mesh { name = "wave_disc_organic" };
+            m.SetVertices(verts); m.SetNormals(norms); m.SetUVs(0, uvs); m.SetTriangles(tris, 0, false);
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>A welded, blobby bowl wall (open tube) from a bottom radius to a top radius,
+        /// its outline following the organic profile, optionally capped at either end. Normals are
+        /// recomputed so the curved wall shades smoothly.</summary>
+        public static Mesh TruncatedConeOrganic(float radiusBottom, float radiusTop, float height,
+            int segments, float seed, float amp, bool capBottom, bool capTop)
+        {
+            segments = Mathf.Max(12, segments);
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            const int rings = 3;
+
+            for (int r = 0; r <= rings; r++)
+            {
+                float t = r / (float)rings;
+                float y = height * t;
+                float rad = Mathf.Lerp(radiusBottom, radiusTop, t);
+                for (int s = 0; s <= segments; s++)
+                {
+                    float th = Mathf.PI * 2f * (s / (float)segments);
+                    float k = OrganicRadius(th, seed, amp);
+                    verts.Add(new Vector3(Mathf.Cos(th) * rad * k, y, Mathf.Sin(th) * rad * k));
+                    norms.Add(Vector3.up);
+                    uvs.Add(new Vector2(s / (float)segments, t));
+                }
+            }
+            int row = segments + 1;
+            for (int r = 0; r < rings; r++)
+                for (int s = 0; s < segments; s++)
+                {
+                    int a = r * row + s, b = a + 1, c = a + row, e = c + 1;
+                    tris.Add(a); tris.Add(c); tris.Add(b);
+                    tris.Add(b); tris.Add(c); tris.Add(e);
+                }
+
+            if (capBottom) AddOrganicCap(verts, norms, uvs, tris, radiusBottom, 0f, seed, amp, segments, false);
+            if (capTop) AddOrganicCap(verts, norms, uvs, tris, radiusTop, height, seed, amp, segments, true);
+
+            var m = new Mesh { name = "cone_organic" };
+            m.SetVertices(verts); m.SetNormals(norms); m.SetUVs(0, uvs); m.SetTriangles(tris, 0, false);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            m.RecalculateTangents();
+            return m;
+        }
+
+        static void AddOrganicCap(List<Vector3> verts, List<Vector3> norms, List<Vector2> uvs, List<int> tris,
+            float radius, float y, float seed, float amp, int segments, bool up)
+        {
+            int c = verts.Count;
+            Vector3 n = up ? Vector3.up : Vector3.down;
+            verts.Add(new Vector3(0f, y, 0f)); norms.Add(n); uvs.Add(new Vector2(0.5f, 0.5f));
+            for (int s = 0; s < segments; s++)
+            {
+                float th0 = Mathf.PI * 2f * (s / (float)segments);
+                float th1 = Mathf.PI * 2f * ((s + 1) / (float)segments);
+                float k0 = OrganicRadius(th0, seed, amp), k1 = OrganicRadius(th1, seed, amp);
+                verts.Add(new Vector3(Mathf.Cos(th0) * radius * k0, y, Mathf.Sin(th0) * radius * k0));
+                norms.Add(n); uvs.Add(new Vector2(0.5f + Mathf.Cos(th0) * 0.5f, 0.5f + Mathf.Sin(th0) * 0.5f));
+                verts.Add(new Vector3(Mathf.Cos(th1) * radius * k1, y, Mathf.Sin(th1) * radius * k1));
+                norms.Add(n); uvs.Add(new Vector2(0.5f + Mathf.Cos(th1) * 0.5f, 0.5f + Mathf.Sin(th1) * 0.5f));
+                if (up) { tris.Add(c); tris.Add(c + 1 + s * 2); tris.Add(c + 2 + s * 2); }
+                else { tris.Add(c); tris.Add(c + 2 + s * 2); tris.Add(c + 1 + s * 2); }
+            }
         }
 
         /// <summary>Builds a mesh of the given string laid out left-to-right from the font's
@@ -371,13 +614,13 @@ namespace SnowCannon
                         (byte)Mathf.Clamp(baseV - 1f, 0f, 255f),
                         baseV, 255);
 
-                    // A slow dirt mask: where the low-frequency noise dips, blend a soft brown
-                    // patch in. Kept gentle (max ~45%) so the field stays snow-white overall.
+                    // A very sparse dirt mask: only the deepest low-frequency dips show a faint
+                    // brown hint, so the field reads as clean snow with just a whisper of grit.
                     float dirt = Mathf.PerlinNoise(x * 0.017f + 40f, y * 0.017f + 12f);
-                    if (dirt < 0.40f)
+                    if (dirt < 0.26f)
                     {
-                        float k = Mathf.Clamp01((0.40f - dirt) / 0.40f) * 0.45f;
-                        Color brown = new Color(0.46f, 0.34f, 0.22f, 1f);
+                        float k = Mathf.Clamp01((0.26f - dirt) / 0.26f) * 0.16f;
+                        Color brown = new Color(0.55f, 0.45f, 0.34f, 1f);
                         c = Color.Lerp(c, brown, k);
                     }
 
@@ -385,16 +628,69 @@ namespace SnowCannon
                 }
             }
 
-            // A light scatter of tiny darker grains so up close it is not perfectly clean.
-            for (int i = 0; i < 900; i++)
+            // A faint scatter of tiny cool grains so up close it is not perfectly flat, kept
+            // light and bright so the overall field stays snow-white.
+            for (int i = 0; i < 320; i++)
             {
                 int x = Random.Range(0, size), y = Random.Range(0, size);
-                float shade = Random.Range(150f, 205f);
-                float jitter = Random.Range(0.85f, 1.1f);
+                float shade = Random.Range(196f, 226f);
+                float jitter = Random.Range(0.94f, 1.04f);
                 px[y * size + x] = new Color32(
-                    (byte)Mathf.Clamp(shade * 1.15f * jitter, 0f, 255f),
-                    (byte)Mathf.Clamp(shade * 0.95f * jitter, 0f, 255f),
-                    (byte)Mathf.Clamp(shade * 0.78f * jitter, 0f, 255f), 255);
+                    (byte)Mathf.Clamp(shade * 1.02f * jitter, 0f, 255f),
+                    (byte)Mathf.Clamp(shade * 1.01f * jitter, 0f, 255f),
+                    (byte)Mathf.Clamp(shade * 1.0f * jitter, 0f, 255f), 255);
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
+            return tex;
+        }
+
+        /// <summary>
+        /// A pond-water texture: a deep blue base broken by lighter cyan swirls and a few bright
+        /// glints, so the lake reads as moving water rather than a flat blue disc. The swirls are
+        /// built from domain-warped Perlin noise (the sample point is bent by a second noise field)
+        /// which gives the streaky, current-like look of the reference photo.
+        /// </summary>
+        public static Texture2D WaterSwirl()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "water_swirl_tex" };
+            var px = new Color32[size * size];
+
+            Color deep = new Color(0.06f, 0.28f, 0.55f, 1f);
+            Color mid = new Color(0.13f, 0.46f, 0.74f, 1f);
+            Color light = new Color(0.55f, 0.82f, 0.95f, 1f);
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float fx = x * 0.05f, fy = y * 0.05f;
+                    // Domain warp: bend the sample coordinates so the bands curl into swirls.
+                    float wx = Mathf.PerlinNoise(fx + 3.1f, fy + 7.7f) - 0.5f;
+                    float wy = Mathf.PerlinNoise(fx + 9.2f, fy + 1.3f) - 0.5f;
+                    float band = Mathf.PerlinNoise(fx + wx * 3.4f, fy + wy * 3.4f);
+                    // A second, tighter ripple layer for fine current lines.
+                    float ripple = Mathf.PerlinNoise(fx * 2.3f + wy * 1.6f, fy * 2.3f + wx * 1.6f);
+
+                    Color c = Color.Lerp(deep, mid, Mathf.Clamp01(band * 1.25f - 0.12f));
+                    // Lighter crests where the ripple peaks, thin and streaky.
+                    float crest = Mathf.Clamp01((ripple - 0.62f) / 0.38f);
+                    c = Color.Lerp(c, light, crest * 0.72f);
+
+                    px[y * size + x] = c;
+                }
+            }
+
+            // A sparse scatter of bright glints (sun catching the surface).
+            for (int i = 0; i < 260; i++)
+            {
+                int x = Random.Range(0, size), y = Random.Range(0, size);
+                px[y * size + x] = new Color32(235, 248, 255, 255);
             }
 
             tex.SetPixels32(px);
@@ -643,6 +939,35 @@ namespace SnowCannon
             var tex = Cloud();
             return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), Vector2.zero, 128f);
         }
+
+        /// <summary>A rounded-rectangle sprite with a soft edge, authored as a 9-slice so it can
+        /// be stretched to any button size without distorting the corners.</summary>
+        public static Sprite RoundedRectSprite(int size = 64, int corner = 18)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "rounded_rect_tex" };
+            var px = new Color32[size * size];
+            float r = corner;
+            float half = size * 0.5f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    // Distance from the nearest corner centre; inside the corner radius we round off.
+                    float dx = Mathf.Max(Mathf.Abs(x + 0.5f - half) - (half - r), 0f);
+                    float dy = Mathf.Max(Mathf.Abs(y + 0.5f - half) - (half - r), 0f);
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float a = Mathf.Clamp01(r - d + 0.5f);   // soft 1px edge
+                    px[y * size + x] = new Color32(255, 255, 255, (byte)Mathf.Clamp(a * 255f, 0f, 255f));
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, false);
+            tex.wrapMode = TextureWrapMode.Clamp;
+            tex.filterMode = FilterMode.Bilinear;
+            // The plain overload is the reliable one in 6.6; the rounded corners stretch a touch
+            // when a button is very wide, which reads fine for these pill-shaped buttons.
+            return Sprite.Create(tex, new Rect(0, 0, size, size), Vector2.zero, 100f);
+        }
     }
 
     /// <summary>
@@ -776,6 +1101,21 @@ namespace SnowCannon
             m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             m.renderQueue = 3001;
             return m;
+        }
+
+        /// <summary>Turns shadow casting on/off for every renderer under a root. Used to give the
+        /// solid props a soft ground shadow while keeping transparent water and decals out of the
+        /// shadow map. Uses the bool castShadows API (the ShadowCastingMode enum is not in scope
+        /// in this project's assembly).</summary>
+        public static void SetShadows(GameObject root, bool cast, bool receive)
+        {
+            if (root == null) return;
+            var rs = root.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < rs.Length; i++)
+            {
+                rs[i].castShadows = cast;
+                rs[i].receiveShadows = receive;
+            }
         }
     }
 

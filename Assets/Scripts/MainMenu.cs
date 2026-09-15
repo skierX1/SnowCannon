@@ -243,21 +243,23 @@ namespace SnowCannon
 
         void BuildButtons()
         {
-            // The three primary buttons sit along the top, under the title.
-            Ui.AddButton(root, "play", "PLAY", new Vector2(260f, 96f), 46,
-                         GameConfig.CannonYellow, OnPlay);
-            Ui.Place(Rt("play"), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                     new Vector2(-300f, -250f), new Vector2(260f, 96f));
+            // The three primary buttons sit along the top, under the title. They are anchored at
+            // FRACTIONAL x positions across the root (not fixed pixel offsets) so they always fit
+            // the screen width, even on an extreme-aspect phone like a Galaxy Fold in portrait,
+            // where fixed +/-300 px offsets would push the outer buttons off the edge.
+            PlaceTopButton("play", "PLAY", 46, GameConfig.CannonYellow, OnPlay, 0.18f);
+            PlaceTopButton("options", "OPTIONS", 38, GameConfig.CannonSteel, OnOptions, 0.5f);
+            PlaceTopButton("highscore", "HIGH SCORE", 34, GameConfig.CannonSteel, OnHighScore, 0.82f);
+        }
 
-            Ui.AddButton(root, "options", "OPTIONS", new Vector2(260f, 96f), 40,
-                         GameConfig.CannonSteel, OnOptions);
-            Ui.Place(Rt("options"), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                     new Vector2(0f, -250f), new Vector2(260f, 96f));
-
-            Ui.AddButton(root, "highscore", "HIGH SCORE", new Vector2(260f, 96f), 40,
-                         GameConfig.CannonSteel, OnHighScore);
-            Ui.Place(Rt("highscore"), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                     new Vector2(300f, -250f), new Vector2(260f, 96f));
+        void PlaceTopButton(string name, string label, int font, Color bg, Action onClick, float fx)
+        {
+            var btn = Ui.AddButton(root, name, label, new Vector2(240f, 92f), font, bg, onClick);
+            var rt = Ui.Rt(btn.gameObject);
+            rt.anchorMin = new Vector2(fx, 1f);
+            rt.anchorMax = new Vector2(fx, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, -230f);
         }
 
         RectTransform Rt(string name)

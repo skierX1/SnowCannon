@@ -57,9 +57,13 @@ namespace SnowCannon
         const float BoreR = 1.02f;
         const int TubeSegments = 48;
         const int TubeRings = 16;
-        Mesh wallMesh, boreMesh;
-        Vector3[] wallBase, boreBase, wallScratch, boreScratch;
-        float[] wallAngle, boreAngle;
+        Mesh boreMesh;
+        Vector3[] boreBase, boreScratch;
+        float[] boreAngle;
+        // Every tube band (grey tail, yellow body, grey muzzle) plus the dark bore liner. They are
+        // all displaced together by the fire-squash bulge, each around its own centre z (zc0).
+        struct TubeSeg { public Mesh mesh; public Vector3[] bas, scratch; public float[] ang; public float baseR, zc0; }
+        readonly List<TubeSeg> segs = new List<TubeSeg>();
 
         SnowCannonGame game;
 
@@ -109,15 +113,16 @@ namespace SnowCannon
             // The tube is one smooth, welded cylinder mesh (shared vertices, smooth normals) so it
             // reads as a round barrel instead of a faceted ring of boxes. The fire-squash bulge is
             // applied by displacing its vertices radially each frame (see DisplaceTube in Update).
-            wallMesh = MeshFactory.Tube(TubeR, TubeLen, TubeSegments, TubeRings);
-            wallBase = wallMesh.vertices;
-            wallAngle = DeriveAngles(wallBase);
-            wallScratch = new Vector3[wallBase.Length];
-            var wallGo = new GameObject("wall");
-            wallGo.AddComponent<MeshFilter>().sharedMesh = wallMesh;
-            wallGo.AddComponent<MeshRenderer>().material = yellow;
-            wallGo.transform.SetParent(barrelPivot, false);
-            wallGo.transform.localPosition = new Vector3(0f, 0f, TubeCenterZ);
+            // The barrel is one smooth tube split into three colour bands so it reads like the
+            // real Latemar-style unit: a grey muzzle end, a yellow body, and a grey tail. All three
+            // share the fire-squash bulge (displaced together in Update through the `segs` list).
+            const float RearEndZ = -1.30f;
+            const float FrontEndZ = 1.10f;
+            const float RearSplitZ = -0.72f;   // grey tail -> yellow body
+            const float FrontSplitZ = 0.55f;   // yellow body -> grey muzzle
+            AddTubeBand("wall_tail", steel, TubeR, RearEndZ, RearSplitZ);
+            AddTubeBand("wall_body", yellow, TubeR, RearSplitZ, FrontSplitZ);
+            AddTubeBand("wall_muzzle", steel, TubeR, FrontSplitZ, FrontEndZ);
 
             // Dark inner liner just inside the wall so the bore reads as hollow. Double-sided so
             // the camera looking in through the open back sees the inner surface.
@@ -132,6 +137,7 @@ namespace SnowCannon
             boreGo.AddComponent<MeshRenderer>().material = boreMat;
             boreGo.transform.SetParent(barrelPivot, false);
             boreGo.transform.localPosition = new Vector3(0f, 0f, TubeCenterZ);
+            segs.Add(new TubeSeg { mesh = boreMesh, bas = boreBase, scratch = boreScratch, ang = boreAngle, baseR = BoreR, zc0 = TubeCenterZ });
 
             // Steel rims framing the two open ends of the tube.
             // The front rim is registered as a bulge element so the very mouth stretches with the
@@ -144,7 +150,7 @@ namespace SnowCannon
             // A dark housing plate sits BEHIND the fan (deeper into the tube) so the blades
             // stay visible through the open back while the plate gives them a backdrop and
             // carries the rear branding. The camera looks from -Z, so nearer = more negative z.
-            var backPlate = AddPart("back_plate", PrimitiveType.Cylinder, fan, Vector3.zero,
+            var backPlate = AddPart("back_plate", PrimitiveType.Cylinder, steel, Vector3.zero,
                                    new Vector3(2.28f, 0.08f, 2.28f), new Vector3(90f, 0f, 0f));
             backPlate.SetParent(barrelPivot, false);
             backPlate.localPosition = new Vector3(0f, 0f, -0.55f);
@@ -190,10 +196,10 @@ namespace SnowCannon
                 bulgeElems.Add(new BulgeElem { t = n, angle = a, z = 1.16f, baseR = 1.32f, baseScale = nScale });
             }
 
-            // The yellow, curvy front shroud: a flared truncated cone like the real unit's nose,
-            // with a dark mesh face recessed behind the nozzle ring. Painted the cannon's yellow so
-            // the barrel body reads yellow, not gray.
-            var shroudMat = Mat.Opaque(GameConfig.CannonYellow);
+            // The grey, curvy front shroud: a flared truncated cone like the real unit's nose,
+            // with a dark mesh face recessed behind the nozzle ring. Painted steel-grey so the
+            // muzzle end reads grey against the yellow body.
+            var shroudMat = Mat.Opaque(GameConfig.CannonSteel);
             var shroud = AddMesh("shroud", MeshFactory.TruncatedCone(1.06f, 1.44f, 0.55f, 48),
                                 shroudMat, new Vector3(0f, 0f, 0.55f), new Vector3(90f, 0f, 0f));
             shroud.SetParent(barrelPivot, false);
@@ -253,15 +259,36 @@ namespace SnowCannon
             UpdateAim();
         }
 
+        /// <summary>Adds one colour band of the barrel tube between two z positions (barrel
+        /// space). The band is a smooth open cylinder centred on its own mid-z so the fire-squash
+        /// bulge can displace it around that centre.</summary>
+        void AddTubeBand(string name, Material mat, float radius, float zFrom, float zTo)
+        {
+            float len = zTo - zFrom;
+            float zc = (zFrom + zTo) * 0.5f;
+            int rings = Mathf.Max(4, Mathf.RoundToInt(TubeRings * len / TubeLen));
+            var mesh = MeshFactory.Tube(radius, len, TubeSegments, rings);
+            var bas = mesh.vertices;
+            var ang = DeriveAngles(bas);
+            var scratch = new Vector3[bas.Length];
+            var go = new GameObject(name);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().material = mat;
+            go.transform.SetParent(barrelPivot, false);
+            go.transform.localPosition = new Vector3(0f, 0f, zc);
+            segs.Add(new TubeSeg { mesh = mesh, bas = bas, scratch = scratch, ang = ang, baseR = radius, zc0 = zc });
+        }
+
         /// <summary>Pushes a smooth tube mesh's vertices radially outward along the travelling
-        /// gaussian bulge, then recomputes its (still smooth) normals.</summary>
+        /// gaussian bulge, then recomputes its (still smooth) normals. `zc0` is the mesh's own
+        /// centre z in barrel space (its local verts are centred on zero).</summary>
         void DisplaceTube(Mesh m, Vector3[] baseVerts, float[] ang, Vector3[] scratch,
-                          float baseR, float zc, float amp, float inv2w2)
+                          float baseR, float zc, float amp, float inv2w2, float zc0)
         {
             if (m == null || baseVerts == null) return;
             for (int i = 0; i < baseVerts.Length; i++)
             {
-                float dd = (baseVerts[i].z + TubeCenterZ) - zc;
+                float dd = (baseVerts[i].z + zc0) - zc;
                 float g = Mathf.Exp(-dd * dd * inv2w2);
                 float r = baseR * (1f + amp * g);
                 scratch[i] = new Vector3(Mathf.Cos(ang[i]) * r, Mathf.Sin(ang[i]) * r, baseVerts[i].z);
@@ -391,9 +418,12 @@ namespace SnowCannon
                 float amp = BulgeAmp * env;
                 recoilKick = RecoilMax * Mathf.Sin(Mathf.PI * prog);
                 float inv2w2 = 1f / (2f * BulgeWidth * BulgeWidth);
-                // Push the smooth tube walls out along the travelling bulge, then the rims/nozzles.
-                DisplaceTube(wallMesh, wallBase, wallAngle, wallScratch, TubeR, zc, amp, inv2w2);
-                DisplaceTube(boreMesh, boreBase, boreAngle, boreScratch, BoreR, zc, amp, inv2w2);
+                // Push every tube band (and the bore liner) out along the travelling bulge.
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    var t = segs[i];
+                    DisplaceTube(t.mesh, t.bas, t.ang, t.scratch, t.baseR, zc, amp, inv2w2, t.zc0);
+                }
                 for (int i = 0; i < bulgeElems.Count; i++)
                 {
                     var e = bulgeElems[i];
@@ -409,8 +439,7 @@ namespace SnowCannon
             else if (bulgeActive)
             {
                 recoilKick = 0f;
-                ResetTube(wallMesh, wallBase);
-                ResetTube(boreMesh, boreBase);
+                for (int i = 0; i < segs.Count; i++) ResetTube(segs[i].mesh, segs[i].bas);
                 for (int i = 0; i < bulgeElems.Count; i++)
                 {
                     var e = bulgeElems[i];

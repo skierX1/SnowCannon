@@ -68,6 +68,25 @@ namespace SnowCannon
             return Mathf.Max(MinSpawnInterval, v);
         }
 
+        /// <summary>The half-width of the field that is actually visible on screen at a given
+        /// world depth, read from the live camera frustum. Because the camera is a pinhole, the
+        /// far spawn depth projects the logical field width into only a narrow slice of the
+        /// screen, so spawning/bouncing against this value (instead of the fixed FieldHalfWidth)
+        /// is what makes snowmen truly use the whole screen width and bounce at the visible
+        /// edges. Clamped to a sane range so a degenerate camera never flings them off-world.</summary>
+        public static float VisibleHalfWidthAtZ(Camera cam, float z)
+        {
+            if (cam == null) return FieldHalfWidth;
+            Vector3 fwd = cam.transform.forward;
+            float fz = Mathf.Abs(fwd.z);
+            if (fz < 0.05f) fz = 0.05f;
+            float dist = (z - cam.transform.position.z) / fz;
+            if (dist <= 0f) return FieldHalfWidth;
+            float halfH = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.PI / 180f) * dist;
+            float halfW = halfH * Mathf.Max(0.2f, cam.aspect);
+            return Mathf.Clamp(halfW, 3f, 22f);
+        }
+
         // ---- Palette -----------------------------------------------------------
         public static readonly Color CannonYellow = new Color(0.98f, 0.78f, 0.06f, 1f);
         public static readonly Color CannonYellowDark = new Color(0.78f, 0.57f, 0.03f, 1f);
