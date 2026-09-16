@@ -15,6 +15,9 @@ namespace SnowCannon
         [SerializeField] AudioClip[] screamClips;
         [SerializeField] AudioClip musicClip;
 
+        // The four background tunes; one is chosen at random for every run (see PlayRandomMusic).
+        AudioClip[] musicVariants;
+
         // The scooter engine idle is synthesised lazily and shared by every live scooter, which
         // each mount it on their own 3D AudioSource so the putter tracks the vehicle across screen.
         AudioClip scooterClip;
@@ -54,6 +57,8 @@ namespace SnowCannon
             if (throwClip == null) throwClip = AudioFactory.Throw();
             if (screamClips == null || screamClips.Length == 0) screamClips = AudioFactory.Screams();
             if (musicClip == null) musicClip = AudioFactory.Music();
+            if (musicVariants == null || musicVariants.Length == 0)
+                musicVariants = AudioFactory.MusicVariants();
 
             for (int i = 0; i < 6; i++) throwPool.Add(MakeSource("throw" + i, throwClip, false));
             for (int i = 0; i < 6; i++) screamPool.Add(MakeSource("scream" + i, null, true));
@@ -68,8 +73,25 @@ namespace SnowCannon
             musicSource.spatialBlend = 0f;
             musicSource.volume = 0.35f;
             musicSource.priority = 8;
+            musicSource.clip = musicClip;
 
             ApplySettings();
+        }
+
+        /// <summary>Picks one of the four tunes at random and (re)starts it. Called at the start
+        /// of every run so each game gets a different backing track. Respects the music toggle.</summary>
+        public void PlayRandomMusic()
+        {
+            if (musicSource == null) return;
+            if (musicVariants == null || musicVariants.Length == 0)
+                musicVariants = AudioFactory.MusicVariants();
+            if (musicVariants.Length == 0) return;
+
+            var pick = musicVariants[UnityEngine.Random.Range(0, musicVariants.Length)];
+            if (pick == null) return;
+            musicSource.Stop();
+            musicSource.clip = pick;
+            if (Settings.Music) musicSource.Play();
         }
 
         static AudioSource MakeSource(string name, AudioClip clip, bool threeD)

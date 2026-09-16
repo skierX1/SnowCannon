@@ -83,7 +83,11 @@ namespace SnowCannon
             // The 3D water pond lives in the world (bottom-left of the field) and feeds the cannon
             // through a yellow hose that runs along the bottom of the screen.
             lake = Lake.Create(transform, cam);
-            if (lake != null && cannon != null) lake.ConnectHose(cannon.transform.position);
+            if (lake != null && cannon != null)
+            {
+                lake.SetCannon(cannon.transform);   // lets the pond auto-shrink clear of the cannon
+                lake.ConnectHose(cannon.transform.position);
+            }
 
             // Give the solid props a soft ground shadow; keep the water and text decals out of it.
             if (cannon != null) Mat.SetShadows(cannon.gameObject, true, false);
@@ -95,6 +99,9 @@ namespace SnowCannon
             hits = 0;
             levelTimer = GameConfig.LevelDuration(level);
             spawnTimer = 0.6f; // a short grace beat before the first snowman
+
+            // Every run gets one of the four background tunes, chosen at random.
+            if (AudioDirector.Instance != null) AudioDirector.Instance.PlayRandomMusic();
         }
 
         void OnDestroy()

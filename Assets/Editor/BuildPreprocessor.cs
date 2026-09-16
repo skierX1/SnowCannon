@@ -34,7 +34,39 @@ namespace SnowCannon
             // Only relevant for the desktop player we ship; harmless for any other target.
             BurstDisabler.Disable();
             ShaderRegistrar.EnsureRegistered();
+            DisableMobileSRPBatcher();
             CleanStaleSolutionArtifacts(path);
+        }
+
+        /// <summary>
+        /// Forces the URP SRP Batcher OFF on the mobile render-pipeline asset. On OpenGLES3 the
+        /// batcher silently drops SRP mesh draw calls, so the cannon, ground, snowmen and lake
+        /// render nothing on Android while the built-in-shader sky/snowflakes/UI survive. The
+        /// asset is committed with the flag off, but we re-assert it here so a reimport or a
+        /// template reset can never silently re-break the phone build. Best-effort.
+        /// </summary>
+        static void DisableMobileSRPBatcher()
+        {
+            try
+            {
+                var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(
+                    "Assets/Settings/Mobile_RPAsset.asset");
+                if (asset == null) return;
+                var t = asset.GetType();
+                var prop = t.GetProperty("useSRPBatcher");
+                if (prop == null || !prop.CanWrite) return;
+                if ((bool)prop.GetValue(asset))
+                {
+                    prop.SetValue(asset, false);
+                    EditorUtility.SetDirty(asset);
+                    AssetDatabase.SaveAssets();
+                    Debug.Log("[BuildPreprocessor] forced useSRPBatcher=false on Mobile_RPAsset");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[BuildPreprocessor] SRP-batcher fix skipped: " + e.Message);
+            }
         }
 
         /// <summary>

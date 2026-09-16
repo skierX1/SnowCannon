@@ -77,10 +77,13 @@ namespace SnowCannon
             return FirstLevelDuration + Mathf.Max(0, level - 1);
         }
 
-        /// <summary>Level 1 = 1.3333 s (1.5x faster than the old 2 s), every next level is
-        /// 80 % of the previous one, floored at MinSpawnInterval.</summary>
+        /// <summary>Level 1 is deliberately gentle: twice the base cadence (2.6666 s) so the
+        /// opening minute breathes. Every level after it steps down by 80 % from the base,
+        /// floored at MinSpawnInterval.</summary>
         public static float SpawnInterval(int level)
         {
+            if (level <= 1)
+                return Mathf.Max(MinSpawnInterval, FirstSpawnInterval * 2f);
             float v = FirstSpawnInterval * Mathf.Pow(SpawnIntervalFactor, Mathf.Max(0, level - 1));
             return Mathf.Max(MinSpawnInterval, v);
         }

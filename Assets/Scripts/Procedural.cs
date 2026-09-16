@@ -649,6 +649,70 @@ namespace SnowCannon
             return tex;
         }
 
+        /// <summary>The lake's inner basin + shoreline dressing: a bright, warm-white gravel.
+        /// A near-white base with cool shadow crevices and a dense scatter of small rounded
+        /// pebbles (each with a lit top and a shaded bottom) so the pond floor and shore read as
+        /// clean pale stones rather than the old dark grey basin.</summary>
+        public static Texture2D Gravel()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "gravel_tex" };
+            var px = new Color32[size * size];
+
+            // A bright, slightly warm off-white base broken by low-frequency grey crevice shading.
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float n = Mathf.PerlinNoise(x * 0.08f, y * 0.08f);
+                    float crevice = Mathf.PerlinNoise(x * 0.14f + 30f, y * 0.14f + 8f);
+                    // baseV: high (bright) where crevice is high, darker in the deep crevices.
+                    float baseV = Mathf.Lerp(196f, 246f, crevice) + n * 10f;
+                    baseV = Mathf.Clamp(baseV, 150f, 252f);
+                    px[y * size + x] = new Color32(
+                        (byte)Mathf.Clamp(baseV * 1.005f, 0f, 255f),
+                        (byte)Mathf.Clamp(baseV * 1.005f, 0f, 255f),
+                        (byte)Mathf.Clamp(baseV, 0f, 255f), 255);
+                }
+            }
+
+            // A dense scatter of small rounded pebbles: a lit crown and a soft shaded base, in
+            // cool greys with a whisper of warm, so the surface reads as packed pale stones.
+            for (int i = 0; i < 520; i++)
+            {
+                int cx = Random.Range(2, size - 2);
+                int cy = Random.Range(2, size - 2);
+                int r = Random.Range(2, 6);
+                float tone = Random.Range(176f, 236f);
+                bool warm = Random.value < 0.28f;
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        float d2 = dx * dx + dy * dy;
+                        if (d2 > r * r) continue;
+                        int x = cx + dx, y = cy + dy;
+                        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+                        // Lit toward the upper-left, shaded toward the lower-right.
+                        float light = 1f - (dx + dy) / (float)(2 * r) * 0.5f;
+                        float edge = 1f - Mathf.Sqrt(d2) / r * 0.35f;
+                        float v = Mathf.Clamp(tone * light * edge, 120f, 252f);
+                        byte rr = (byte)Mathf.Clamp(warm ? v * 1.03f : v * 0.99f, 0f, 255f);
+                        byte gg = (byte)Mathf.Clamp(v, 0f, 255f);
+                        byte bb = (byte)Mathf.Clamp(warm ? v * 0.97f : v * 1.02f, 0f, 255f);
+                        px[y * size + x] = new Color32(rr, gg, bb, 255);
+                    }
+                }
+            }
+
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            tex.wrapMode = TextureWrapMode.Repeat;
+            tex.filterMode = FilterMode.Trilinear;
+            tex.anisoLevel = 4;
+            return tex;
+        }
+
         /// <summary>
         /// A pond-water texture: a deep blue base broken by lighter cyan swirls and a few bright
         /// glints, so the lake reads as moving water rather than a flat blue disc. The swirls are
@@ -1233,11 +1297,32 @@ namespace SnowCannon
             return Clip("scooter", data);
         }
 
-        /// <summary>A short, cheerful, seamlessly loopable tune.</summary>
+        /// <summary>A short, cheerful, seamlessly loopable tune (the default track).</summary>
         public static AudioClip Music()
         {
-            float[] notes = { 262f, 330f, 392f, 330f, 440f, 392f, 330f, 294f };
-            const float noteDur = 0.34f;
+            return BuildLoop("music", new[] { 262f, 330f, 392f, 330f, 440f, 392f, 330f, 294f }, 0.34f, 0);
+        }
+
+        /// <summary>The four background tunes the game may pick from. Each is a distinct mood —
+        /// a bright sine lead, a faster triangle run, a slower minor square-wave waltz, and a
+        /// bouncy pentatonic climb — and each loops seamlessly, so one can be chosen at random
+        /// for every run.</summary>
+        public static AudioClip[] MusicVariants()
+        {
+            return new[]
+            {
+                BuildLoop("music_0", new[] { 262f, 330f, 392f, 330f, 440f, 392f, 330f, 294f }, 0.34f, 0),
+                BuildLoop("music_1", new[] { 330f, 392f, 440f, 523f, 440f, 392f, 330f, 294f, 330f, 392f }, 0.26f, 1),
+                BuildLoop("music_2", new[] { 294f, 349f, 440f, 349f, 294f, 262f, 294f, 349f }, 0.40f, 2),
+                BuildLoop("music_3", new[] { 392f, 440f, 523f, 587f, 523f, 440f, 392f, 330f, 392f, 440f }, 0.30f, 0),
+            };
+        }
+
+        /// <summary>Renders a note list into one seamlessly loopable clip. Every note cell
+        /// starts and ends at (near) silence via its attack/decay envelope, so butt-joining the
+        /// cells leaves no click at the loop seam. The timbre selects the harmonic recipe.</summary>
+        static AudioClip BuildLoop(string name, float[] notes, float noteDur, int timbre)
+        {
             int per = (int)(Rate * noteDur);
             int n = per * notes.Length;
             var data = new float[n];
@@ -1249,12 +1334,27 @@ namespace SnowCannon
                     float t = i / (float)Rate;
                     float k = i / (float)per;
                     float env = Mathf.Min(1f, k * 12f) * Mathf.Pow(1f - k, 1.4f);
-                    float tone = Mathf.Sin(2f * Mathf.PI * f * t) * 0.5f
-                               + Mathf.Sin(2f * Mathf.PI * f * 2f * t) * 0.16f;
+                    float ph = 2f * Mathf.PI * f * t;
+                    float tone;
+                    switch (timbre)
+                    {
+                        case 1:   // triangle-ish: fundamental + a signed third harmonic
+                            tone = Mathf.Sin(ph) * 0.5f
+                               + Mathf.Sin(ph * 3f) * 0.12f * (Mathf.Sin(ph) >= 0f ? 1f : -1f);
+                            break;
+                        case 2:   // square-ish: odd harmonics only
+                            tone = Mathf.Sin(ph) * 0.42f
+                               + Mathf.Sin(ph * 3f) * 0.20f
+                               + Mathf.Sin(ph * 5f) * 0.12f;
+                            break;
+                        default:  // bright sine + octave
+                            tone = Mathf.Sin(ph) * 0.5f + Mathf.Sin(ph * 2f) * 0.16f;
+                            break;
+                    }
                     data[s * per + i] = tone * env * 0.22f;
                 }
             }
-            return Clip("music", data);
+            return Clip(name, data);
         }
 
         static AudioClip Clip(string name, float[] data)

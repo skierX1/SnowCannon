@@ -42,6 +42,14 @@ namespace SnowCannon
         float size = 1f;
         float swayPhase;
 
+        // Spawn-in "pop up from the snow": instead of blinking into existence, the snowman scales
+        // up from nothing with a slight elastic overshoot and rises from just under the snow
+        // surface to resting on it, so it visibly grows into the field like a real snowman being
+        // rolled up out of the drift. Runs once, over SpawnInTime, at the start of its life.
+        const float SpawnInTime = 0.42f;
+        float spawnInTimer;
+        bool spawningIn = true;
+
         // The hinged lower jaw that opens and closes at random while the snowman marches.
         Transform jaw;
         float jawPhase, jawTimer, jawOpen;
@@ -148,6 +156,10 @@ namespace SnowCannon
             transform.localScale = Vector3.one * size;
             HeadWorldY = transform.position.y + Yt * size;
             Mat.SetShadows(gameObject, true, false);
+
+            // Start collapsed to (almost) nothing so the first Update's spawn-in animation grows
+            // it up out of the snow instead of showing a full-size snowman for one frame.
+            transform.localScale = Vector3.one * (size * 0.001f);
         }
 
         void BuildMouth(Material coal)
@@ -429,6 +441,35 @@ namespace SnowCannon
                     bottomBall.Rotate(rollAxis.normalized, omegaDeg, Space.World);
                 }
             }
+
+            // Spawn-in "pop up from the snow": grow the stack up from nothing with a slight elastic
+            // overshoot while it rises from just under the snow surface to resting on it. Done last
+            // so it overrides the march's scale/height for the duration of the pop.
+            if (spawningIn)
+            {
+                spawnInTimer += Time.deltaTime;
+                float k = Mathf.Clamp01(spawnInTimer / SpawnInTime);
+                // Elastic ease-out (overshoots just past 1 then settles) for a lively "pop".
+                const float c1 = 1.70158f;
+                const float c3 = c1 + 1f;
+                float q = k - 1f;
+                float e = 1f + c3 * q * q * q + c1 * q * q;
+                float s = size * Mathf.Max(0.001f, e);
+                transform.localScale = Vector3.one * s;
+                var sp = transform.position;
+                sp.y = Mathf.Lerp(-Rb * size * 1.6f, 0f, k);
+                transform.position = sp;
+                HeadWorldY = sp.y + Yt * s;
+                if (k >= 1f)
+                {
+                    spawningIn = false;
+                    transform.localScale = Vector3.one * size;
+                    var fp = transform.position;
+                    fp.y = 0f;
+                    transform.position = fp;
+                    HeadWorldY = Yt * size;
+                }
+            }
         }
 
         /// <summary>Separates this snowman from any other it has driven into and reflects both
@@ -474,6 +515,18 @@ namespace SnowCannon
         {
             points = 0;
             if (IsDying) return false;
+
+            // If it is still popping up out of the snow, snap it to full size first so the death
+            // burst detaches the parts at their real scale instead of a shrunken one.
+            if (spawningIn)
+            {
+                spawningIn = false;
+                transform.localScale = Vector3.one * size;
+                var gp = transform.position;
+                gp.y = 0f;
+                transform.position = gp;
+                HeadWorldY = Yt * size;
+            }
 
             points = hitPoint.y >= HeadWorldY - Rt * size * 0.45f
                        ? GameConfig.PointsHead

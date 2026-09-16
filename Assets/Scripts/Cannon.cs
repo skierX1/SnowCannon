@@ -19,6 +19,12 @@ namespace SnowCannon
         /// snowman reaches the machine.</summary>
         public float FootprintRadius { get { return 1.5f; } }
 
+        /// <summary>The fixed world X of the cannon's LEFTMOST position over its whole aim sweep
+        /// (fully left-aimed). The lake sizes itself against this so it never overlaps the cannon
+        /// no matter how the player is currently aiming — unlike reading the live position, which
+        /// slides as the turret turns and would make the lake pulse in size.</summary>
+        public float LeftmostX { get { return basePos.x - halfTravel; } }
+
         Transform muzzle;
         Transform barrelPivot;
         Transform fanBlades;

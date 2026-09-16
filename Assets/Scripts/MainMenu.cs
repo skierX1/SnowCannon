@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -31,6 +32,17 @@ namespace SnowCannon
         Text snowmanSoundValue;
         Text cannonSoundValue;
 
+        // Keyboard navigation for desktop players: the arrow keys (or WASD) move a focus ring
+        // across the currently visible panel's buttons; Enter / Space presses the focused one.
+        readonly List<Button> navButtons = new List<Button>();
+        int navIndex = -1;
+        GameObject navPanel;
+        Button navFocused;
+
+        // Touch devices keep the vibration option; desktop hides it (there is no haptics to offer).
+        static readonly bool s_mobile = Application.platform == RuntimePlatform.Android
+                                     || Application.platform == RuntimePlatform.IPhonePlayer;
+
         void Awake()
         {
             Settings.LoadAndApply();
@@ -51,10 +63,16 @@ namespace SnowCannon
             BuildHighScorePanel();
 
             ShowMain();
+            EnsureCursorVisible();
         }
 
         void Update()
         {
+            // The menu is always fully pointer-driven: the play scene hides and locks the cursor,
+            // and on a fast return that state can leak through, so re-assert a free, visible
+            // cursor every frame here. This is the fix for the pointer vanishing on the menu.
+            EnsureCursorVisible();
+
             // ESC leaves the game from the title screen too, mirroring the play scene.
             if (UnityEngine.InputSystem.Keyboard.current != null &&
                 UnityEngine.InputSystem.Keyboard.current.escapeKey.wasPressedThisFrame)
@@ -63,9 +81,102 @@ namespace SnowCannon
                 return;
             }
 
+            NavUpdate();
+
 #if UNITY_EDITOR
             SmokeUpdate();
 #endif
+        }
+
+        /// <summary>Guarantees the mouse cursor is shown and unlocked anywhere on the menu.</summary>
+        void EnsureCursorVisible()
+        {
+            if (!Cursor.visible) Cursor.visible = true;
+            if (Cursor.lockState != CursorLockMode.None) Cursor.lockState = CursorLockMode.None;
+        }
+
+        // ---- keyboard navigation ------------------------------------------------
+
+        /// <summary>The panel whose buttons the keyboard currently drives.</summary>
+        GameObject ActivePanel()
+        {
+            if (soundPanel != null && soundPanel.activeSelf) return soundPanel;
+            if (optionsPanel != null && optionsPanel.activeSelf) return optionsPanel;
+            if (highScorePanel != null && highScorePanel.activeSelf) return highScorePanel;
+            return root != null ? root.gameObject : null;
+        }
+
+        void NavUpdate()
+        {
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb == null) return;
+
+            // When the visible panel changes, rebuild the focus set and start at its first button.
+            GameObject panel = ActivePanel();
+            if (panel != navPanel)
+            {
+                navPanel = panel;
+                RebuildNav(panel);
+                navIndex = navButtons.Count > 0 ? 0 : -1;
+                ApplyFocus();
+            }
+            if (navButtons.Count == 0) return;
+
+            int n = navButtons.Count;
+            bool moved = false;
+            if (kb.downArrowKey.wasPressedThisFrame || kb.sKey.wasPressedThisFrame)
+            { navIndex = (navIndex + 1) % n; moved = true; }
+            else if (kb.upArrowKey.wasPressedThisFrame || kb.wKey.wasPressedThisFrame)
+            { navIndex = (navIndex - 1 + n) % n; moved = true; }
+            else if (kb.rightArrowKey.wasPressedThisFrame || kb.dKey.wasPressedThisFrame)
+            { navIndex = (navIndex + 1) % n; moved = true; }
+            else if (kb.leftArrowKey.wasPressedThisFrame || kb.aKey.wasPressedThisFrame)
+            { navIndex = (navIndex - 1 + n) % n; moved = true; }
+
+            if (moved) { ApplyFocus(); return; }
+
+            if (kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame ||
+                kb.spaceKey.wasPressedThisFrame)
+            {
+                if (navFocused != null && navFocused.interactable) navFocused.onClick.Invoke();
+            }
+        }
+
+        void RebuildNav(GameObject panel)
+        {
+            navButtons.Clear();
+            if (panel == null) return;
+            foreach (var b in panel.GetComponentsInChildren<Button>(true))
+            {
+                if (b == null || !b.interactable || !b.gameObject.activeInHierarchy) continue;
+                navButtons.Add(b);
+            }
+            // Read top-to-bottom, then left-to-right, so the arrow keys walk the layout naturally.
+            navButtons.Sort((a, b) =>
+            {
+                var pa = (RectTransform)a.transform;
+                var pb = (RectTransform)b.transform;
+                float dy = pb.position.y - pa.position.y;
+                if (Mathf.Abs(dy) > 8f) return dy > 0f ? 1 : -1;
+                return pa.position.x > pb.position.x ? 1 : -1;
+            });
+        }
+
+        void ApplyFocus()
+        {
+            if (navFocused != null)
+            {
+                var prev = navFocused.GetComponent<Outline>();
+                if (prev != null) prev.enabled = false;
+            }
+            navFocused = (navIndex >= 0 && navIndex < navButtons.Count) ? navButtons[navIndex] : null;
+            if (navFocused == null) return;
+
+            var outline = navFocused.GetComponent<Outline>();
+            if (outline == null) outline = navFocused.gameObject.AddComponent<Outline>();
+            outline.effectColor = GameConfig.CannonYellow;
+            outline.effectDistance = new Vector2(3f, 3f);
+            outline.enabled = true;
         }
 
 #if UNITY_EDITOR
@@ -291,7 +402,9 @@ namespace SnowCannon
             soundLabel = AddToggleRow(card, "sound", "SOUND", 0, OnOpenSound);
             musicLabel = AddToggleRow(card, "music", "MUSIC", 1, OnToggleMusic);
             qualityLabel = AddToggleRow(card, "quality", "QUALITY", 2, OnCycleQuality);
-            vibrationLabel = AddToggleRow(card, "vibration", "VIBRATION", 3, OnToggleVibration);
+            // Vibration only means something on a phone/tablet; hide the row on desktop.
+            if (s_mobile)
+                vibrationLabel = AddToggleRow(card, "vibration", "VIBRATION", 3, OnToggleVibration);
 
             Ui.AddButton(card, "back", "BACK", new Vector2(220f, 74f), 34,
                         GameConfig.CannonSteel, ShowMain);

@@ -38,7 +38,10 @@ Thumbs.db
 GhiThumbs.db
 *.swp
 Build_Win64
+Build_WinVerify
 Build_Android
+Build_AndroidVerify
+Build_LinuxVerify
 Build_iOS
 Build_aab
 /[Bb]uild_[Aa]ndroid/

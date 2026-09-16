@@ -72,9 +72,33 @@ namespace SnowCannon
         // back to a still, round shape) exactly when the lake is empty, and resume when it refills.
         float hoseFlow = 1f;
 
-        // The whole pond is drawn 3.375x the original footprint (a further 1.5x on top of the
-        // earlier 2.25x), so the lake reads as a large, unmistakable corner feature.
-        const float Scale = 3.375f;
+        // The whole pond's authored footprint. Reduced 1.5x from the previous 3.375 (which was
+        // itself a 1.5x step-up on 2.25) so the lake reads as a comfortable corner feature without
+        // dominating the field. The ACTUAL on-screen size is then fixed per screen resolution by
+        // SizeAgainstCannon, which only ever scales this DOWN to clear the cannon's leftmost reach.
+        const float Scale = 2.25f;
+
+        // The pond's full footprint radius (the grass sward is the widest element at BankR*1.18),
+        // used to test the lake against the cannon and shrink it out of any overlap.
+        const float FootR = BankR * 1.18f;
+
+        // The cannon the pond must never touch. The pond is sized against the cannon's FIXED
+        // leftmost reach (Cannon.LeftmostX), never its live position, so the lake never pulses in
+        // size as the turret turns. See SizeAgainstCannon.
+        Transform cannon;
+        Cannon cannonComp;
+
+        // The screen pixel size the pond was last sized for. Its scale is FIXED for the whole run
+        // and only recomputed when this changes (a phone rotation or a desktop window resize),
+        // never as the cannon aims. Initialised to an impossible value so the first Update sizes it.
+        int sizedForWidth = -1;
+        int sizedForHeight = -1;
+
+        // The cannon leftmost-reach value the pond was last sized against. The cannon's leftmost X
+        // is FIXED while aiming (it only depends on basePos/halfTravel), so this never changes
+        // mid-run and the lake never pulses; it exists only so the lake re-sizes once if the
+        // cannon's Start() computes halfTravel AFTER the lake's first frame (ordering safety).
+        float sizedForLeftmost = float.NaN;
 
         // The world depth the pond is parked at (near the front of the field = bottom of screen).
         const float LakeZ = -7.0f;
@@ -117,6 +141,29 @@ namespace SnowCannon
             return lake;
         }
 
+        /// <summary>Hands the lake the cannon transform so it can shrink itself clear of the
+        /// muzzle on narrow screens where the corner pond and the aiming cannon would otherwise
+        /// collide. Safe to call after the cannon exists.</summary>
+        public void SetCannon(Transform c)
+        {
+            cannon = c;
+            cannonComp = c != null ? c.GetComponent<Cannon>() : null;
+        }
+
+        /// <summary>A bright white-gravel material for the pond's inner basin and shoreline:
+        /// the pebbled Gravel texture under a near-white tint, tiled to the caller's density.
+        /// Replaces the old dark-grey basin so the lake floor and shore read as clean pale stones.</summary>
+        Material GravelMaterial(float tile = 3f)
+        {
+            var tex = TextureFactory.Gravel();
+            tex.wrapMode = TextureWrapMode.Repeat;
+            var m = Mat.Textured(tex, new Color(0.93f, 0.94f, 0.96f, 1f));
+            m.SetFloat("_Smoothness", 0.12f);
+            m.SetTextureScale("_BaseMap", new Vector2(tile, tile));
+            m.name = "mat_gravel";
+            return m;
+        }
+
         void Build()
         {
             basePos = transform.position;
@@ -134,7 +181,7 @@ namespace SnowCannon
             rim.transform.SetParent(transform, false);
             rim.transform.localPosition = new Vector3(0f, 0.035f, 0f);
             rim.AddComponent<MeshFilter>().sharedMesh = MeshFactory.WaveDiscOrganic(BasinTopR * 1.05f, 2, 48, Seed, Amp);
-            rim.AddComponent<MeshRenderer>().material = Mat.Opaque(MudColor);
+            rim.AddComponent<MeshRenderer>().material = GravelMaterial(4f);
 
             // Basin wall: a flared organic bowl, double-sided so we see the inside.
             var wall = new GameObject("basin_wall");
@@ -142,7 +189,7 @@ namespace SnowCannon
             wall.transform.localPosition = new Vector3(0f, FloorY, 0f);
             wall.AddComponent<MeshFilter>().sharedMesh =
                 MeshFactory.TruncatedConeOrganic(BasinBotR, BasinTopR, BasinH, 48, Seed, Amp, false, false);
-            var wallMat = Mat.Opaque(BasinColor);
+            var wallMat = GravelMaterial(3f);
             wallMat.SetFloat("_Cull", 0f);
             wall.AddComponent<MeshRenderer>().material = wallMat;
 
@@ -152,7 +199,7 @@ namespace SnowCannon
             floor.transform.localPosition = new Vector3(0f, FloorY + 0.01f, 0f);
             floor.AddComponent<MeshFilter>().sharedMesh = MeshFactory.WaveDiscOrganic(BasinBotR * 0.98f, 2, 32, Seed, Amp);
             floorRend = floor.AddComponent<MeshRenderer>();
-            floorRend.material = Mat.Opaque(BasinColor);
+            floorRend.material = GravelMaterial(3f);
 
             // Water body: an organic capped cylinder from the bed up to the surface, scaled by
             // the level. Textured with the swirl so it reads as a mass of water.
@@ -464,12 +511,57 @@ namespace SnowCannon
             anchorPos = new Vector3(lakeX, 0f, lakeZ);
             basePos = anchorPos;
             transform.position = anchorPos;
+            // NOTE: the pond's SIZE is deliberately NOT recomputed here. PlaceInCorner runs every
+            // frame; sizing here (against the cannon's live position) was the bug that made the
+            // lake grow/shrink as the cannon aimed. Sizing happens only in SizeAgainstCannon, which
+            // Update calls just when the screen resolution changes.
+        }
+
+        /// <summary>Scales the pond down (never up past its authored size) so its right edge stays
+        /// clear of the cannon's LEFTMOST position over the cannon's whole aim sweep. Sizing against
+        /// the fixed leftmost reach (Cannon.LeftmostX) — not the live position, which slides as the
+        /// turret turns — is what keeps the lake a constant size during play while still guaranteeing
+        /// it never overlaps the cannon however the player is aiming. Called once at the start of the
+        /// run and again only when the screen resolution changes.</summary>
+        void SizeAgainstCannon()
+        {
+            if (cannon == null)
+            {
+                transform.localScale = Vector3.one * Scale;
+                return;
+            }
+            // The cannon's fixed leftmost world X (fully left-aimed). Fall back to the live X only
+            // if the Cannon component is somehow unavailable.
+            float leftmostX = cannonComp != null ? cannonComp.LeftmostX : cannon.position.x;
+            const float CannonHalf = 1.5f;                 // generous half-width of the cannon body
+            float naturalR = FootR * Scale;                // full-size footprint radius
+            float allowed = (leftmostX - CannonHalf) - anchorPos.x;   // gap to the cannon's leftmost left edge
+            // Keep at least 34 % of the pond so it never vanishes on an absurdly narrow screen.
+            float r = Mathf.Min(naturalR, Mathf.Max(naturalR * 0.34f, allowed));
+            float s = r / FootR;
+            transform.localScale = new Vector3(s, s, s);
         }
 
         void Update()
         {
             // Keep the pond locked to the bottom-left corner even if the screen ratio changes.
             PlaceInCorner();
+
+            // The pond's SIZE is fixed for the whole run and only recomputed when the screen
+            // resolution changes (a phone rotation, a desktop window resize). It deliberately does
+            // NOT follow the cannon's live position — that used to make the lake pulse in size as
+            // the player aimed. Sized against the cannon's fixed leftmost reach instead.
+            int scrW = Screen.width;
+            int scrH = Screen.height;
+            bool resize = scrW != sizedForWidth || scrH != sizedForHeight;
+            if (cannonComp != null && cannonComp.LeftmostX != sizedForLeftmost) resize = true;
+            if (resize)
+            {
+                sizedForWidth = scrW;
+                sizedForHeight = scrH;
+                sizedForLeftmost = cannonComp != null ? cannonComp.LeftmostX : float.NaN;
+                SizeAgainstCannon();
+            }
 
             // Ease the visible water toward the true level so it glides up and down.
             float target = Mathf.Clamp01(Marks / (float)Max);
