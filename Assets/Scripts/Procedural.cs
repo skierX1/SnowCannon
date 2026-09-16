@@ -66,6 +66,43 @@ namespace SnowCannon
             return mesh;
         }
 
+        /// <summary>A flat annulus (ring) lying in the XZ plane at y=0, with the given inner and
+        /// outer radii. Used for the ground landing reticle and the banner's aura ring. Normals face
+        /// up; callers that need it visible from both sides should disable culling on its material.</summary>
+        public static Mesh FlatRing(float innerR, float outerR, int segments)
+        {
+            segments = Mathf.Max(8, segments);
+            if (outerR < innerR) { float t = innerR; innerR = outerR; outerR = t; }
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            for (int s = 0; s <= segments; s++)
+            {
+                float a = (s / (float)segments) * Mathf.PI * 2f;
+                float c = Mathf.Cos(a), sn = Mathf.Sin(a);
+                verts.Add(new Vector3(c * innerR, 0f, sn * innerR));
+                norms.Add(Vector3.up);
+                uvs.Add(new Vector2(s / (float)segments, 0f));
+                verts.Add(new Vector3(c * outerR, 0f, sn * outerR));
+                norms.Add(Vector3.up);
+                uvs.Add(new Vector2(s / (float)segments, 1f));
+            }
+            for (int s = 0; s < segments; s++)
+            {
+                int a0 = s * 2, b0 = s * 2 + 1, c0 = (s + 1) * 2, e0 = (s + 1) * 2 + 1;
+                tris.Add(a0); tris.Add(b0); tris.Add(c0);
+                tris.Add(b0); tris.Add(e0); tris.Add(c0);
+            }
+            var m = new Mesh { name = "flatring" };
+            m.SetVertices(verts);
+            m.SetNormals(norms);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(tris, 0, false);
+            m.RecalculateBounds();
+            return m;
+        }
+
         /// <summary>A copy of a (unit-ish) sphere mesh whose surface is pushed in and out along
         /// its normals by a smooth, seed-stable noise, so the snow balls read as hand-rolled
         /// lumps rather than perfect spheres. The source mesh is never modified.</summary>

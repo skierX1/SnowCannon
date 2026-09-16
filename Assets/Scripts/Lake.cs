@@ -598,8 +598,14 @@ namespace SnowCannon
                 const float amp = 0.055f;
                 for (int i = 0; i < hoseBaseVerts.Length; i++)
                 {
-                    float w = Mathf.Sin((hoseRingT[i] * 3f - hoseWavePhase) * Mathf.PI * 2f);
-                    float bulge = Mathf.Max(0f, w) * amp * hoseFlow;
+                    float t = hoseRingT[i];
+                    // Fade the squish to zero at both ends (over the first/last ~16% of the run).
+                    // The tube is open-ended, so a crest arriving at the cannon joint flared the end
+                    // ring outward and exposed the bright interior as a repeating white spot; keeping
+                    // the end rings perfectly round removes that flash while the mid-tube still pulses.
+                    float env = Mathf.Clamp01(Mathf.Min(t, 1f - t) / 0.16f);
+                    float w = Mathf.Sin((t * 3f - hoseWavePhase) * Mathf.PI * 2f);
+                    float bulge = Mathf.Max(0f, w) * amp * hoseFlow * env;
                     hoseScratch[i] = hoseBaseVerts[i] + hoseNormals[i] * bulge;
                 }
                 hoseMesh.vertices = hoseScratch;

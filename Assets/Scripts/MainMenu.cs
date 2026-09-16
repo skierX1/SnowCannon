@@ -31,6 +31,7 @@ namespace SnowCannon
         bool refreshingVolume;
         Text snowmanSoundValue;
         Text cannonSoundValue;
+        Text reticleLabel;
 
         // Keyboard navigation for desktop players: the arrow keys (or WASD) move a focus ring
         // across the currently visible panel's buttons; Enter / Space presses the focused one.
@@ -42,6 +43,10 @@ namespace SnowCannon
         // Touch devices keep the vibration option; desktop hides it (there is no haptics to offer).
         static readonly bool s_mobile = Application.platform == RuntimePlatform.Android
                                      || Application.platform == RuntimePlatform.IPhonePlayer;
+
+        // A large, high-contrast pointer built once and reused for every menu visit, so the cursor
+        // is easy to see on the desktop title/options/high-score screens. Null until first built.
+        static Texture2D s_bigCursor;
 
         void Awake()
         {
@@ -64,6 +69,8 @@ namespace SnowCannon
 
             ShowMain();
             EnsureCursorVisible();
+            // Desktop only: swap in the oversized pointer so it is easy to track on the menu.
+            if (!s_mobile) EnsureBigCursor();
         }
 
         void Update()
@@ -93,6 +100,80 @@ namespace SnowCannon
         {
             if (!Cursor.visible) Cursor.visible = true;
             if (Cursor.lockState != CursorLockMode.None) Cursor.lockState = CursorLockMode.None;
+        }
+
+        /// <summary>Builds (once) a big white-with-black-outline pointer and installs it as the
+        /// active cursor. The play scene hides the cursor while aiming, so this oversized pointer
+        /// is only ever seen on the menu and the game-over card, exactly where a large, easy-to-find
+        /// pointer helps. CursorMode.ForceSoftware is required so the custom texture is drawn over
+        /// the game window instead of the system default.</summary>
+        static void EnsureBigCursor()
+        {
+            if (s_bigCursor == null) s_bigCursor = BuildArrowCursor(48);
+            if (s_bigCursor != null)
+                Cursor.SetCursor(s_bigCursor, Vector2.zero, CursorMode.ForceSoftware);
+        }
+
+        /// <summary>Rasterises a classic pointer-arrow silhouette (tip at the top-left, which is
+        /// also the hotspot) into an RGBA texture: white fill, a one-pixel black outline for
+        /// contrast against the snow, transparent elsewhere.</summary>
+        static Texture2D BuildArrowCursor(int size)
+        {
+            const int gw = 11, gh = 20;   // the arrow's design grid
+            float[] ax = { 0f, 0f, 4f, 7f, 9f, 6f, 11f };
+            float[] ay = { 0f, 16f, 13f, 20f, 19f, 12f, 12f };
+            int n = ax.Length;
+            float sx = (size - 1) / (float)gw;
+            float sy = (size - 1) / (float)gh;
+
+            // Unity's pixel array is row-major with y = 0 at the BOTTOM, so the visual top row maps
+            // to the last array row; convert the visual (y-down) grid into that orientation.
+            var inside = new bool[size * size];
+            for (int yb = 0; yb < size; yb++)
+                for (int x = 0; x < size; x++)
+                {
+                    float vx = x / sx;
+                    float vy = (size - 1 - yb) / sy;
+                    inside[yb * size + x] = PointInPoly(vx, vy, ax, ay, n);
+                }
+
+            var px = new Color32[size * size];
+            for (int yb = 0; yb < size; yb++)
+                for (int x = 0; x < size; x++)
+                {
+                    int i = yb * size + x;
+                    if (inside[i]) px[i] = new Color32(255, 255, 255, 255);
+                    else if (AnyNeighbourInside(inside, size, x, yb)) px[i] = new Color32(12, 12, 16, 255);
+                    else px[i] = new Color32(0, 0, 0, 0);
+                }
+
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            tex.SetPixels32(px);
+            tex.Apply(false, false);
+            tex.filterMode = FilterMode.Bilinear;
+            tex.wrapMode = TextureWrapMode.Clamp;
+            return tex;
+        }
+
+        static bool PointInPoly(float x, float y, float[] xs, float[] ys, int n)
+        {
+            bool c = false;
+            for (int i = 0, j = n - 1; i < n; j = i++)
+            {
+                if ((ys[i] > y) != (ys[j] > y) &&
+                    (x < (xs[j] - xs[i]) * (y - ys[i]) / (ys[j] - ys[i]) + xs[i]))
+                    c = !c;
+            }
+            return c;
+        }
+
+        static bool AnyNeighbourInside(bool[] inside, int size, int x, int y)
+        {
+            if (x > 0 && inside[y * size + (x - 1)]) return true;
+            if (x < size - 1 && inside[y * size + (x + 1)]) return true;
+            if (y > 0 && inside[(y - 1) * size + x]) return true;
+            if (y < size - 1 && inside[(y + 1) * size + x]) return true;
+            return false;
         }
 
         // ---- keyboard navigation ------------------------------------------------
@@ -402,9 +483,11 @@ namespace SnowCannon
             soundLabel = AddToggleRow(card, "sound", "SOUND", 0, OnOpenSound);
             musicLabel = AddToggleRow(card, "music", "MUSIC", 1, OnToggleMusic);
             qualityLabel = AddToggleRow(card, "quality", "QUALITY", 2, OnCycleQuality);
+            // The ballistic landing reticle can be shown or hidden from here (on by default).
+            reticleLabel = AddToggleRow(card, "reticle", "AIM RETICLE", 3, OnToggleReticle);
             // Vibration only means something on a phone/tablet; hide the row on desktop.
             if (s_mobile)
-                vibrationLabel = AddToggleRow(card, "vibration", "VIBRATION", 3, OnToggleVibration);
+                vibrationLabel = AddToggleRow(card, "vibration", "VIBRATION", 4, OnToggleVibration);
 
             Ui.AddButton(card, "back", "BACK", new Vector2(220f, 74f), 34,
                         GameConfig.CannonSteel, ShowMain);
@@ -599,6 +682,7 @@ namespace SnowCannon
         }
         void OnToggleMusic() { Settings.Music = !Settings.Music; if (AudioDirector.Instance != null) AudioDirector.Instance.ApplySettings(); RefreshOptionLabels(); }
         void OnToggleVibration() { Settings.Vibration = !Settings.Vibration; RefreshOptionLabels(); }
+        void OnToggleReticle() { Settings.AimReticle = !Settings.AimReticle; RefreshOptionLabels(); }
         void OnCycleQuality() { Settings.Quality = (Settings.Quality + 1) % Settings.QualityLevelCount; RefreshOptionLabels(); }
         void OnResetHighScore() { Settings.ResetHighScore(); if (highScoreValue != null) highScoreValue.text = "0"; }
 
@@ -607,6 +691,7 @@ namespace SnowCannon
             if (soundLabel != null) soundLabel.text = Settings.Sound ? "ON" : "OFF";
             if (musicLabel != null) musicLabel.text = Settings.Music ? "ON" : "OFF";
             if (vibrationLabel != null) vibrationLabel.text = Settings.Vibration ? "ON" : "OFF";
+            if (reticleLabel != null) reticleLabel.text = Settings.AimReticle ? "ON" : "OFF";
             if (qualityLabel != null)
             {
                 string[] names = { "LOW", "MEDIUM", "HIGH" };

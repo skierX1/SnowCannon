@@ -33,7 +33,15 @@ namespace SnowCannon
         float beaconPhase;
         Vector3 basePos;
         float halfTravel = 1.8f;
+        // The main camera and the FOV/aspect it was last measured against, so a screen rotation
+        // (which changes the aspect, and the FOV once FitCamera re-fits) re-derives halfTravel
+        // instead of keeping the value frozen at the orientation the run started in.
+        Camera camRef;
+        float sizedFov = -1f;
+        float sizedAspect = -1f;
         float cooldown;
+        // While > 0 the cannon is jammed (a Bomber's shot splattered the mechanism) and cannot fire.
+        float jamTimer;
         float fanSpinDelay = 1.2f;
         float fanSpinSpeed;
         // Fan coast-down after the run ends: -1 means "still running", otherwise it is the
@@ -42,6 +50,12 @@ namespace SnowCannon
         const float FanSpinDownTime = 10f;
         float fanSpinDownTimer = -1f;
         float fanSpinDownFrom;
+        // Once the run has ended the fan must never spin back up: the coast-down branch resets
+        // fanSpinDownTimer to -1 when it finishes, which would otherwise fall the code back into
+        // the spin-UP branch and re-start the fan a few seconds behind the game-over card. This
+        // latch is set by StopFan and gates the spin-up branch so the fan stays stopped until the
+        // next run (which builds a brand-new Cannon instance, so no reset is needed).
+        bool fanStopped;
 
         // Fire "squash": the oversized snowball forcing its way down the narrow bore. The tube
         // walls balloon outward in a bulge that travels from the back of the barrel to the
@@ -245,13 +259,9 @@ namespace SnowCannon
             bl.transform.localPosition = new Vector3(0f, 1.55f, 0.1f);
             beaconLight = bl;
 
-            // Branding decals: light text on the dark rear housing, dark text on the yellow flanks.
-            AddLabel("label_back", "SNOW#WIPER", new Vector3(0f, -0.55f, -0.7f), Vector3.zero,
-                     new Vector3(1.7f, 0.4f, 1f), new Color(0.92f, 0.95f, 1f, 1f));
-            AddLabel("label_left", "SNOW#WIPER", new Vector3(-1.31f, 0.15f, 0.1f),
-                     new Vector3(0f, 90f, 0f), new Vector3(1.6f, 0.36f, 1f), new Color(0.08f, 0.09f, 0.11f, 1f));
-            AddLabel("label_right", "SNOW#WIPER", new Vector3(1.31f, 0.15f, 0.1f),
-                     new Vector3(0f, -90f, 0f), new Vector3(1.6f, 0.36f, 1f), new Color(0.08f, 0.09f, 0.11f, 1f));
+            // The rear branding decal has been removed: its text was authored left-aligned, so the
+            // trailing glyphs poked out beyond the tube silhouette on the right flank and read as a
+            // stray black mark. The cannon now carries no floating text decal.
 
             // Snowballs leave from the centre of the tube's mouth.
             muzzle = new GameObject("muzzle_point").transform;
@@ -403,18 +413,33 @@ namespace SnowCannon
         void Start()
         {
             basePos = transform.position;
-            // The strafe reach is a sixth of the visible screen width at the cannon's depth.
-            var cam = Camera.main;
-            if (cam != null)
-            {
-                float dist = Mathf.Abs(cam.transform.position.z - basePos.z);
-                float halfH = Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.PI / 180f) * dist;
-                halfTravel = Mathf.Max(1.2f, halfH * cam.aspect / 6f);
-            }
+            camRef = Camera.main;
+            RecomputeHalfTravel(true);
+        }
+
+        /// <summary>The strafe reach is a sixth of the visible screen width at the cannon's depth.
+        /// Recomputed whenever the camera's FOV or aspect changes (a phone rotation, a desktop
+        /// window resize) so the aim sweep and the lake's sizing track the live projection.</summary>
+        void RecomputeHalfTravel(bool force)
+        {
+            if (camRef == null) camRef = Camera.main;
+            if (camRef == null) return;
+            if (!force && Mathf.Approximately(camRef.fieldOfView, sizedFov)
+                && Mathf.Approximately(camRef.aspect, sizedAspect)) return;
+            sizedFov = camRef.fieldOfView;
+            sizedAspect = camRef.aspect;
+            float dist = Mathf.Abs(camRef.transform.position.z - basePos.z);
+            float halfH = Mathf.Tan(sizedFov * 0.5f * Mathf.PI / 180f) * dist;
+            halfTravel = Mathf.Max(1.2f, halfH * sizedAspect / 6f);
         }
 
         void Update()
         {
+            // Keep the strafe reach (and therefore LeftmostX, which the lake sizes against) in sync
+            // with the live camera so a mid-run screen rotation re-fits the layout instead of leaving
+            // the lake mis-placed/mis-sized and the cannon appearing to change bulk.
+            RecomputeHalfTravel(false);
+
             var controls = game != null ? game.Controls : null;
             Vector2 move = controls != null ? controls.ReadMove() : Vector2.zero;
 
@@ -507,7 +532,7 @@ namespace SnowCannon
                 {
                     fanSpinDelay -= Time.deltaTime;
                 }
-                else
+                else if (!fanStopped)
                 {
                     // Spins three times faster than before during play.
                     if (fanSpinSpeed < 900f) fanSpinSpeed += 600f * Time.deltaTime;
@@ -518,13 +543,21 @@ namespace SnowCannon
             UpdateAim();
 
             cooldown -= Time.deltaTime;
+            if (jamTimer > 0f) jamTimer -= Time.deltaTime;
             if (game == null || controls == null) return;
 
-            if (controls.IsFireHeld() && cooldown <= 0f)
+            if (controls.IsFireHeld() && cooldown <= 0f && jamTimer <= 0f)
             {
                 cooldown = GameConfig.FireCooldown;
                 Fire();
             }
+        }
+
+        /// <summary>Briefly jams the cannon so it cannot fire for the given duration. Called when a
+        /// Bomber's lobbed shot lands near the mechanism.</summary>
+        public void Jam(float duration)
+        {
+            if (duration > jamTimer) jamTimer = duration;
         }
 
         /// <summary>Called when the game-over card is shown: the fan stops driving and
@@ -532,6 +565,7 @@ namespace SnowCannon
         /// losing power. Idempotent, so a repeated call cannot restart the countdown.</summary>
         public void StopFan()
         {
+            fanStopped = true;
             if (fanSpinDownTimer >= 0f) return;
             fanSpinDownFrom = fanSpinSpeed;
             fanSpinDownTimer = FanSpinDownTime;

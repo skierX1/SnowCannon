@@ -114,6 +114,9 @@ namespace SnowCannon
         float deathTimer;
         Vector3 deathSpin;
         Vector3 deathLaunch;
+        // A phase that drives the limbs flailing wildly during the cartwheel (they would otherwise
+        // stay frozen in whatever pose the glide left them in).
+        float deathFlail;
         readonly List<Material> mats = new List<Material>();
 
         public static Skier Spawn(Transform parent, Camera cam, Vector3 start, float dir)
@@ -270,6 +273,19 @@ namespace SnowCannon
 
             // The head keeps a goofy independent spin for the whole tumble.
             if (head != null) head.Rotate(0f, 0f, 900f * Time.deltaTime, Space.Self);
+
+            // The limbs flail wildly as the figure cartwheels: legs and poles thrash about their
+            // pivots at different rates so the knock-back reads as a real ragdoll tumble, not a
+            // rigid mannequin. They were frozen in the last glide pose before this was added.
+            deathFlail += Time.deltaTime;
+            float fA = Mathf.Sin(deathFlail * 22f) * 70f;
+            float fB = Mathf.Sin(deathFlail * 27f + 1.7f) * 80f;
+            float fC = Mathf.Sin(deathFlail * 19f + 0.6f) * 60f;
+            float fD = Mathf.Sin(deathFlail * 24f + 2.4f) * 75f;
+            if (legL != null) legL.localEulerAngles = new Vector3(fA, 0f, fC * 0.4f);
+            if (legR != null) legR.localEulerAngles = new Vector3(fB, 0f, -fD * 0.4f);
+            if (poleL != null) poleL.localEulerAngles = new Vector3(-fB * 1.1f, 0f, fD * 0.5f);
+            if (poleR != null) poleR.localEulerAngles = new Vector3(fA * 1.1f, 0f, -fC * 0.5f);
 
             // Fade everything out over the last stretch.
             float a = 1f - Mathf.SmoothStep(0.35f, 1f, k);

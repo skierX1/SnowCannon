@@ -63,6 +63,44 @@ namespace SnowCannon
         public const int PointsSkier = 1;
         public const int PointsScooter = 3;
 
+        // ---- Combo / streak multiplier ------------------------------------------
+        // Two independent counters live on the director: `streak` (raw consecutive hits) and
+        // `tier` (the active multiplier rung). The streak is only ever zeroed by the idle timeout;
+        // a missed shot demotes the tier one rung (with a one-kill re-earn lock) but never the
+        // streak. TierFromStreak maps a streak to the highest rung it has earned; TierMultiplier
+        // maps a rung index to its score multiplier. Both tables are trivially re-tunable.
+        public const float ComboIdleReset = 1.5f;
+        static readonly int[] ComboThresholds = { 3, 6, 10 };    // streak needed to reach tier 1,2,3
+        static readonly int[] ComboMultipliers = { 1, 2, 3, 5 }; // score multiplier for tier 0..3
+
+        /// <summary>The highest multiplier rung a given consecutive-hit streak has earned.</summary>
+        public static int TierFromStreak(int streak)
+        {
+            int t = 0;
+            for (int i = 0; i < ComboThresholds.Length; i++)
+                if (streak >= ComboThresholds[i]) t = i + 1;
+            return t;
+        }
+
+        /// <summary>The score multiplier a given rung index yields (clamped to the table).</summary>
+        public static int TierMultiplier(int tier)
+        {
+            if (tier < 0) tier = 0;
+            if (tier >= ComboMultipliers.Length) tier = ComboMultipliers.Length - 1;
+            return ComboMultipliers[tier];
+        }
+
+        // ---- Snowman archetypes -------------------------------------------------
+        // Per-kind hit points and the extra hits tougher kinds need. Runner/Splitter die in one
+        // hit; Tank/Banner/Bomber take more. The kind is chosen by the director's level-weighted
+        // spawn mix, so the field escalates from plain Runners to a full tactical blend.
+        public const int TankHp = 3;
+        public const int BannerHp = 2;
+        public const int BomberHp = 2;
+        public const float BannerAuraRadius = 6.5f;
+        public const float BannerSpeedBoost = 0.6f;
+        public const float BomberJamTime = 1.1f;
+
         // ---- Level progression -------------------------------------------------
         public const int FirstLevelDuration = 60;
         public const int SecondLevelDuration = 90;
@@ -164,6 +202,7 @@ namespace SnowCannon
         const string KeyVolume = "sc_volume";
         const string KeyCannonSound = "sc_cannon_sound";
         const string KeySnowmanSound = "sc_snowman_sound";
+        const string KeyAimReticle = "sc_aim_reticle";
 
         public const int QualityLevelCount = 3;
 
@@ -209,6 +248,14 @@ namespace SnowCannon
         {
             get { return PlayerPrefs.GetInt(KeyInvertY, 0) != 0; }
             set { PlayerPrefs.SetInt(KeyInvertY, value ? 1 : 0); }
+        }
+
+        /// <summary>Whether the ballistic landing reticle (the ground marker showing where a shot
+        /// would touch down) is shown while aiming. On by default; toggled from the options menu.</summary>
+        public static bool AimReticle
+        {
+            get { return PlayerPrefs.GetInt(KeyAimReticle, 1) != 0; }
+            set { PlayerPrefs.SetInt(KeyAimReticle, value ? 1 : 0); }
         }
 
         /// <summary>Master volume, a continuous 0..1 value driven by the menu slider.</summary>

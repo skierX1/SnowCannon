@@ -11,6 +11,9 @@ namespace SnowCannon
         Vector3 velocity;
         float life;
         bool dead;
+        // True once this ball has connected with a live target. A ball that leaves the field without
+        // ever connecting reports a miss to the director (which demotes the combo tier, not the streak).
+        bool scored;
         SnowCannonGame game;
 
         // Random tumble: each snowball gets its own spin axis and rate at launch so the
@@ -131,6 +134,7 @@ namespace SnowCannon
 
         void OnHit(IHitTarget target, Vector3 point)
         {
+            scored = true;
             int points;
             bool counted = target.Hit(point, out points);
             if (counted && game != null) game.RegisterHit(target, points);
@@ -142,6 +146,9 @@ namespace SnowCannon
         {
             if (dead) return;
             dead = true;
+            // A ball that never connected is a miss: tell the director so it can demote the combo
+            // tier (the streak itself is only ever broken by the idle timeout).
+            if (!scored && game != null) game.RegisterMiss();
             Destroy(gameObject);
         }
     }

@@ -3,6 +3,12 @@ using UnityEngine;
 
 namespace SnowCannon
 {
+    /// <summary>The tactical snowman archetypes. The director's level-weighted spawn mix chooses
+    /// these so the field escalates from plain Runners into a blend the player must read and
+    /// prioritise: Runners are quick and fragile, Tanks soak many hits, Splitters burst into a
+    /// wave, Banners speed up their neighbours, and Bombers lob shots that jam the cannon.</summary>
+    public enum SnowmanKind { Runner, Tank, Splitter, Banner, Bomber }
+
     /// <summary>
     /// A snowman: three stacked snow balls, coal eyes, a carrot nose, a pot hat and two
     /// branch arms with hands. The bottom ball rolls while the stack advances. One hit
@@ -21,6 +27,19 @@ namespace SnowCannon
         public float Speed { get; private set; }
         public bool IsDying { get; private set; }
         public bool IsDone { get; private set; }
+
+        /// <summary>The tactical archetype this snowman was spawned as.</summary>
+        public SnowmanKind Kind { get; private set; }
+        // Remaining hits before the stack bursts (1 for the fragile kinds, more for the tough ones).
+        int hp = 1;
+        // A temporary speed multiplier applied by a nearby Banner; decays back toward 0 each frame.
+        float speedBoost;
+        // The owning director, handed in after Spawn so a Splitter can spawn children and a Bomber
+        // can lob shots at the cannon.
+        SnowCannonGame owner;
+        float bannerTimer;
+        float bomberTimer = 1.5f;
+        Transform auraRing;
 
         /// <summary>IHitTarget: a snowman still counts as a live target until it is dying or gone.</summary>
         public bool Alive => !IsDying && !IsDone;
@@ -75,10 +94,12 @@ namespace SnowCannon
         }
 
         /// <summary>Builds a snowman and returns its root. The caller owns it.</summary>
-        public static Snowman Spawn(float size, float speed, int textureVariant = -1, float maxAngleDeg = 30f)
+        public static Snowman Spawn(float size, float speed, int textureVariant = -1,
+                                     float maxAngleDeg = 30f, SnowmanKind kind = SnowmanKind.Runner)
         {
             var go = new GameObject("Snowman");
             var sm = go.AddComponent<Snowman>();
+            sm.Kind = kind;
             sm.size = Mathf.Max(0.4f, size);
             sm.Speed = speed;
             // Each snowman picks its own snow look so the field never looks cloned.
@@ -87,10 +108,33 @@ namespace SnowCannon
             sm.maxAngle = Mathf.Clamp(maxAngleDeg, 0f, 30f);
             sm.headingDeg = Random.Range(-sm.maxAngle, sm.maxAngle);
             sm.deathStyle = Random.Range(0, 4);
+
+            // Per-archetype tuning off the caller's base size/speed: the tough kinds are bigger,
+            // slower and need more hits; Runners are the quick, fragile baseline.
+            switch (kind)
+            {
+                case SnowmanKind.Runner:
+                    sm.size *= 0.82f; sm.Speed *= 1.35f; sm.hp = 1; break;
+                case SnowmanKind.Tank:
+                    sm.size *= 1.5f; sm.Speed *= 0.55f; sm.hp = GameConfig.TankHp; break;
+                case SnowmanKind.Splitter:
+                    sm.size *= 1.05f; sm.hp = 1; break;
+                case SnowmanKind.Banner:
+                    sm.size *= 1.1f; sm.Speed *= 0.85f; sm.hp = GameConfig.BannerHp; break;
+                case SnowmanKind.Bomber:
+                    sm.size *= 1.1f; sm.Speed *= 0.8f; sm.hp = GameConfig.BomberHp; break;
+                default:
+                    sm.hp = 1; break;
+            }
+
             sm.Build();
             all.Add(sm);
             return sm;
         }
+
+        /// <summary>Lets the director hand a freshly spawned snowman its owner reference (used by
+        /// the Bomber to lob shots at the cannon and by a Splitter to spawn its children).</summary>
+        public void SetOwner(SnowCannonGame o) { owner = o; }
 
         int textureVariant;
 
@@ -143,6 +187,9 @@ namespace SnowCannon
             // Branch arms with hands, rooted in the middle ball and angled up and outward.
             BuildArm("arm_l", branch, new Vector3(-Rm * 0.5f, Ym + Rm * 0.1f, 0), -1f);
             BuildArm("arm_r", branch, new Vector3(Rm * 0.5f, Ym + Rm * 0.1f, 0), 1f);
+
+            // Archetype-specific silhouette so each kind is readable at a glance.
+            BuildKindExtras();
 
             // One capsule over the whole stack so a snowball's sphere-cast can actually connect.
             // The individual balls are decorative and have their colliders removed.
@@ -298,6 +345,102 @@ namespace SnowCannon
             }
         }
 
+        /// <summary>Adds the per-archetype colour/accessory so the field reads at a glance: a red
+        /// scarf for Runners, a heavy dark vest for Tanks, a green bandana for Splitters, a flagpole
+        /// and ground aura for Banners, and a dark belly shell for Bombers.</summary>
+        void BuildKindExtras()
+        {
+            switch (Kind)
+            {
+                case SnowmanKind.Runner:
+                {
+                    var scarf = Mat.Opaque(new Color(0.85f, 0.16f, 0.18f, 1f));
+                    Register(scarf);
+                    AddMeshPart("scarf", MeshFactory.TruncatedCone(Rm * 0.5f, Rm * 0.62f, Rm * 0.28f, 12), scarf,
+                                new Vector3(0, Ym + Rm * 0.9f, 0), Vector3.one, Vector3.zero);
+                    break;
+                }
+                case SnowmanKind.Tank:
+                {
+                    var vest = Mat.Opaque(new Color(0.2f, 0.22f, 0.26f, 1f));
+                    Register(vest);
+                    AddMeshPart("vest", MeshFactory.TruncatedCone(Rm * 0.7f, Rm * 0.95f, Rm * 1.1f, 14), vest,
+                                new Vector3(0, Ym, 0), Vector3.one, Vector3.zero);
+                    if (bottomBall != null) bottomBall.localScale = Vector3.one * (Rb * 2.5f);
+                    break;
+                }
+                case SnowmanKind.Splitter:
+                {
+                    var band = Mat.Opaque(new Color(0.2f, 0.7f, 0.3f, 1f));
+                    Register(band);
+                    AddMeshPart("band", MeshFactory.TruncatedCone(Rm * 0.55f, Rm * 0.66f, Rm * 0.24f, 12), band,
+                                new Vector3(0, Ym + Rm * 0.95f, 0), Vector3.one, Vector3.zero);
+                    break;
+                }
+                case SnowmanKind.Banner:
+                {
+                    var pole = Mat.Opaque(new Color(0.45f, 0.3f, 0.15f, 1f));
+                    Register(pole);
+                    AddMeshPart("pole", MeshFactory.TruncatedCone(0.05f, 0.05f, Rt * 2.4f, 6), pole,
+                               new Vector3(Rt * 0.7f, Yt + Rt * 0.4f, 0), Vector3.one, Vector3.zero);
+                    var flag = Mat.Opaque(new Color(0.9f, 0.7f, 0.1f, 1f));
+                    Register(flag);
+                    var flagGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    flagGo.name = "flag";
+                    flagGo.transform.SetParent(transform, false);
+                    flagGo.transform.localPosition = new Vector3(Rt * 1.15f, Yt + Rt * 1.4f, 0f);
+                    flagGo.transform.localScale = new Vector3(Rt * 1.1f, Rt * 0.7f, 0.02f);
+                    flagGo.GetComponent<MeshRenderer>().material = flag;
+                    Destroy(flagGo.GetComponent<Collider>());
+                    Track(flagGo, flag);
+
+                    // A faint ground ring marking the buff radius.
+                    var aura = new GameObject("aura");
+                    aura.transform.SetParent(transform, false);
+                    aura.transform.localPosition = new Vector3(0f, 0.05f, 0f);
+                    var mf = aura.AddComponent<MeshFilter>();
+                    mf.sharedMesh = MeshFactory.FlatRing(GameConfig.BannerAuraRadius * 0.9f, GameConfig.BannerAuraRadius, 40);
+                    var rr = aura.AddComponent<MeshRenderer>();
+                    var am = Mat.Transparent(new Color(0.95f, 0.8f, 0.2f, 0.5f));
+                    am.SetFloat("_Cull", 0f);
+                    rr.material = am;
+                    Register(am);
+                    auraRing = aura.transform;
+                    break;
+                }
+                case SnowmanKind.Bomber:
+                {
+                    var shell = Mat.Opaque(new Color(0.15f, 0.16f, 0.2f, 1f));
+                    Register(shell);
+                    AddSphere("shell", shell, new Vector3(0, Ym, -Rm * 0.9f), Rm * 0.5f);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>Buffs every live snowman within the banner's radius up to the boost speed. The
+        /// boost decays on each snowman, so killing the banner lets the buffed ones slow back down.</summary>
+        void ApplyBannerAura()
+        {
+            float r2 = GameConfig.BannerAuraRadius * GameConfig.BannerAuraRadius;
+            var me = transform.position;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var o = all[i];
+                if (o == null || o == this || o.IsDying || o.IsDone) continue;
+                var d = o.transform.position - me;
+                if (d.x * d.x + d.z * d.z <= r2)
+                    o.speedBoost = Mathf.Max(o.speedBoost, GameConfig.BannerSpeedBoost);
+            }
+        }
+
+        /// <summary>Hurls a snow shell at the player's cannon.</summary>
+        void LobBomberShot()
+        {
+            if (owner == null) return;
+            BomberShot.Launch(transform.position + Vector3.up * Ym, owner.CannonWorldPos, owner);
+        }
+
         static void OffsetMesh(MeshFilter filter, Vector3 offset)
         {
             var mesh = filter.sharedMesh;
@@ -392,7 +535,7 @@ namespace SnowCannon
             // left or right, so the path is a random diagonal that uses the whole field width.
             float rad = headingDeg * (Mathf.PI / 180f);
             Vector3 dir = new Vector3(Mathf.Sin(rad), 0f, -Mathf.Cos(rad));
-            p += dir * (Speed * Time.deltaTime);
+            p += dir * (Speed * (1f + speedBoost) * Time.deltaTime);
 
             // Bounce off the visible screen edges so a snowman always stays on screen. The limit
             // is the field width that is actually visible at THIS depth (the camera is a pinhole,
@@ -439,6 +582,24 @@ namespace SnowCannon
                     // omega = v / r, converted to degrees per frame (Mathf has no Rad2Deg in 6.6).
                     float omegaDeg = (Speed / (Rb * size)) * Time.deltaTime * (180f / Mathf.PI);
                     bottomBall.Rotate(rollAxis.normalized, omegaDeg, Space.World);
+                }
+            }
+
+            // Archetype behaviours, active only once fully spawned in: a Banner periodically buffs
+            // nearby snowmen (the boost decays, so killing the banner lets them slow back down); a
+            // Bomber lobs a shell at the cannon on its own cadence.
+            if (!spawningIn)
+            {
+                if (speedBoost > 0f) speedBoost = Mathf.Max(0f, speedBoost - Time.deltaTime * 0.5f);
+                if (Kind == SnowmanKind.Banner)
+                {
+                    bannerTimer -= Time.deltaTime;
+                    if (bannerTimer <= 0f) { bannerTimer = 0.6f; ApplyBannerAura(); }
+                }
+                else if (Kind == SnowmanKind.Bomber)
+                {
+                    bomberTimer -= Time.deltaTime;
+                    if (bomberTimer <= 0f) { bomberTimer = Random.Range(2.2f, 3.6f); LobBomberShot(); }
                 }
             }
 
@@ -528,9 +689,35 @@ namespace SnowCannon
                 HeadWorldY = Yt * size;
             }
 
+            // Tougher archetypes soak several hits. A non-fatal hit only chips the stack (a small
+            // knock for feedback) and scores nothing, so the player must land several shots on a
+            // Tank/Banner/Bomber before it bursts. The snowball despawns on any connect, so each
+            // shot costs exactly one hit.
+            hp--;
+            if (hp > 0)
+            {
+                if (bottomBall != null) bottomBall.Rotate(Vector3.forward, Random.Range(-20f, 20f), Space.Self);
+                return false;
+            }
+
             points = hitPoint.y >= HeadWorldY - Rt * size * 0.45f
                        ? GameConfig.PointsHead
                        : GameConfig.PointsBody;
+
+            // A Splitter bursts into a small wave of Runners on its killing blow, so the player is
+            // rewarded for taking it out EARLY (while far away) rather than letting it reach the line.
+            if (Kind == SnowmanKind.Splitter && owner != null)
+            {
+                var basePos = transform.position;
+                int kids = Random.Range(2, 4);
+                for (int k = 0; k < kids; k++)
+                {
+                    float ox = Random.Range(-1.2f, 1.2f);
+                    float oz = Random.Range(-0.6f, 0.8f);
+                    owner.SpawnAt(SnowmanKind.Runner, basePos + new Vector3(ox, 0f, oz),
+                                  GameConfig.SnowmanMinScale, GameConfig.SnowmanMinSpeed * 1.15f);
+                }
+            }
 
             IsDying = true;
             fadeTimer = 0f;
@@ -606,6 +793,68 @@ namespace SnowCannon
             foreach (var c in chunks)
             {
                 if (c.material != null) Destroy(c.material);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A snow shell hurled by a Bomber at the player's cannon. It flies a short ballistic lob and,
+    /// when it lands close to the cannon, briefly jams the firing mechanism. It is a nuisance
+    /// projectile only: it scores nothing and cannot be shot for points.
+    /// </summary>
+    public sealed class BomberShot : MonoBehaviour
+    {
+        Vector3 velocity;
+        float life;
+        bool dead;
+        Vector3 target;
+        SnowCannonGame owner;
+
+        const float G = 26f;
+        const float UpSpeed = 12f;
+
+        public static void Launch(Vector3 origin, Vector3 target, SnowCannonGame owner)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            go.name = "BomberShot";
+            go.transform.position = origin;
+            var s = go.AddComponent<BomberShot>();
+            s.target = target;
+            s.owner = owner;
+
+            Vector2 h = new Vector2(target.x - origin.x, target.z - origin.z);
+            float dist = h.magnitude;
+            if (h.sqrMagnitude < 1e-4f) h = new Vector2(0f, 1f);
+            h.Normalize();
+            float flight = 2f * UpSpeed / G;                       // time to rise and fall back to launch height
+            float horiz = Mathf.Min(30f, dist / Mathf.Max(0.3f, flight));
+            s.velocity = new Vector3(h.x * horiz, UpSpeed, h.y * horiz);
+            s.life = flight + 0.6f;
+
+            var r = go.GetComponent<MeshRenderer>();
+            r.material = Mat.Opaque(new Color(0.16f, 0.17f, 0.21f, 1f));
+            var col = go.GetComponent<SphereCollider>();
+            if (col != null) Destroy(col);
+            go.transform.localScale = Vector3.one * 0.7f;
+        }
+
+        void Update()
+        {
+            if (dead) return;
+            life -= Time.deltaTime;
+            velocity.y -= G * Time.deltaTime;
+            transform.position += velocity * Time.deltaTime;
+
+            var p = transform.position;
+            bool landed = p.y <= 0.12f || life <= 0f ||
+                          p.z > GameConfig.FieldMaxZ + 6f || Mathf.Abs(p.x) > 40f;
+            if (landed)
+            {
+                // Only jam the cannon if the shell actually fell near it; a wide miss is a dud.
+                float dx = p.x - target.x, dz = p.z - target.z;
+                if (owner != null && dx * dx + dz * dz <= 9f) owner.JamCannon(GameConfig.BomberJamTime);
+                dead = true;
+                Destroy(gameObject);
             }
         }
     }

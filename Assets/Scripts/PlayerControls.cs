@@ -34,6 +34,15 @@ namespace SnowCannon
         static readonly bool s_desktop = Application.platform != RuntimePlatform.Android
                                        && Application.platform != RuntimePlatform.IPhonePlayer;
 
+        // Per-input gains so each control feels right on its own: keys 1.5x snappier than before,
+        // the desktop mouse reaches full speed at half the physical travel, and the phone joystick
+        // sweeps the barrel much faster than a thumb drag used to. The final clamp is raised so
+        // these gains are not clipped back down to the old single-source speed.
+        const float KeyGain = 1.5f;
+        const float MouseDesktopGain = 6f;
+        const float TouchGain = 2.2f;
+        const float MaxMove = 1.8f;
+
         public PlayerControls()
         {
             asset = ScriptableObject.CreateInstance<InputActionAsset>();
@@ -96,7 +105,8 @@ namespace SnowCannon
                 if (kb.wKey.isPressed || kb.upArrowKey.isPressed) dy = Mathf.Max(dy, 1f);
                 if (kb.sKey.isPressed || kb.downArrowKey.isPressed) dy = Mathf.Min(dy, -1f);
             }
-            var keys = new Vector2(Mathf.Clamp(dx, -1f, 1f), Mathf.Clamp(dy, -1f, 1f));
+            // Keys carry their own 1.5x gain so keyboard aiming is noticeably quicker than before.
+            var keys = new Vector2(Mathf.Clamp(dx, -1f, 1f), Mathf.Clamp(dy, -1f, 1f)) * KeyGain;
 
             // Mouse look: read the RAW per-frame device delta, which self-zeroes when the
             // pointer is still. The action map's <Mouse>/delta is a Value action and RETAINS
@@ -108,20 +118,23 @@ namespace SnowCannon
                 mouse = md.delta.ReadValue();
             else
                 mouse = lookDelta.ReadValue<Vector2>();
-            // On desktop (Windows) triple the mouse gain so the cannon tracks the pointer briskly;
+            // On desktop (Windows) raise the mouse gain so the cannon tracks the pointer briskly;
             // touch devices keep the tuned 1x so the stick and swipe stay comfortable.
-            mouse *= Settings.MouseSensitivity * 0.06f * (s_desktop ? 3f : 1f);
+            mouse *= Settings.MouseSensitivity * 0.06f * (s_desktop ? MouseDesktopGain : 1f);
             if (Settings.InvertY) mouse.y = -mouse.y;
             // A resting hand must never make the cannon creep.
             if (mouse.sqrMagnitude < 0.0004f) mouse = Vector2.zero;
-            mouse = Vector2.ClampMagnitude(mouse, 1f);
+            // Allow the mouse to reach the full (raised) move magnitude so a brisk flick rotates
+            // the barrel faster than the old single-source cap, not merely reaching it sooner.
+            mouse = Vector2.ClampMagnitude(mouse, MaxMove);
 
             // Combine additively so a stuck or active mouse can never mask the keyboard and
-            // vice-versa; the clamp keeps the total magnitude sane.
+            // vice-versa; the raised clamp lets the per-source gains (keys/mouse/joystick) express
+            // their full speed instead of being clipped back to the old single-source magnitude.
             var move = keys + mouse;
-            if (touchMove.sqrMagnitude > 0.0004f) move += touchMove;
+            if (touchMove.sqrMagnitude > 0.0004f) move += touchMove * TouchGain;
 
-            return Vector2.ClampMagnitude(move, 1f);
+            return Vector2.ClampMagnitude(move, MaxMove);
         }
 
         public bool IsFireHeld()

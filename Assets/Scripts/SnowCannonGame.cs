@@ -22,6 +22,10 @@ namespace SnowCannon
         public PlayerControls Controls { get; private set; }
 
         Camera cam;
+        // The aspect the camera was last fitted to. When the device rotates (or a desktop window
+        // resizes) the aspect changes and FitCamera must re-run so the FOV, the cannon's strafe
+        // reach, and the lake's corner placement all re-derive from the new projection.
+        float lastFitAspect = -1f;
         readonly List<Snowman> active = new List<Snowman>();
 
         int level = 1;
@@ -30,10 +34,20 @@ namespace SnowCannon
         float levelTimer;
         float spawnTimer;
 
+        // Combo state: `comboStreak` is the raw consecutive-hit count (only the idle timeout zeroes
+        // it), `comboTier` is the active multiplier rung, `comboMissLock` is the number of kills still
+        // owed before the tier may climb again after a miss, and `comboTimer` is the idle countdown.
+        int comboStreak;
+        int comboTier;
+        int comboMissLock;
+        float comboTimer;
+
         Text levelText;
         Text timeText;
         Text scoreText;
         Text waterText;
+        Text comboText;
+        RectTransform popupRoot;
 
         GameObject gameOverPanel;
         Text finalScoreText;
@@ -62,9 +76,23 @@ namespace SnowCannon
         bool capturedOver;
         readonly System.Text.StringBuilder smokeEvents = new System.Text.StringBuilder();
 
+        /// <summary>The live play-scene director, so self-contained entities (the Bomber's lobbed
+        /// shot) can reach the cannon without being handed a reference at spawn time.</summary>
+        public static SnowCannonGame Active;
+
+        /// <summary>The player's cannon, for entities that need to aim at or harass it.</summary>
+        public Cannon CannonRef => cannon;
+
+        /// <summary>World position of the cannon, used as the Bomber's lob target.</summary>
+        public Vector3 CannonWorldPos => cannon != null ? cannon.transform.position : new Vector3(0f, 1f, -5f);
+
+        /// <summary>Called when a Bomber's shot lands near the cannon: briefly jams the firing.</summary>
+        public void JamCannon(float t) { if (cannon != null) cannon.Jam(t); }
+
         void Awake()
         {
             Settings.LoadAndApply();
+            Active = this;
             smokeEnabled = File.Exists("c:/tmp/sc_smoke_enabled");
             EnsureAudio();
 
@@ -79,6 +107,10 @@ namespace SnowCannon
 
             cannon = Cannon.Create(this);
             TouchControls.Attach(this);
+
+            // The ballistic landing reticle tracks the barrel and shows where a shot would touch
+            // down. It is hidden while the lake is dry or when the option is off.
+            AimReticle.Create(transform, cam, cannon, this);
 
             // The 3D water pond lives in the world (bottom-left of the field) and feeds the cannon
             // through a yellow hose that runs along the bottom of the screen.
@@ -97,6 +129,10 @@ namespace SnowCannon
             level = 1;
             score = 0;
             hits = 0;
+            comboStreak = 0;
+            comboTier = 0;
+            comboMissLock = 0;
+            comboTimer = 0f;
             levelTimer = GameConfig.LevelDuration(level);
             spawnTimer = 0.6f; // a short grace beat before the first snowman
 
@@ -106,6 +142,7 @@ namespace SnowCannon
 
         void OnDestroy()
         {
+            if (Active == this) Active = null;
             if (Controls != null) Controls.Dispose();
         }
 
@@ -212,6 +249,16 @@ namespace SnowCannon
 #if UNITY_EDITOR
             SmokeTick();
 #endif
+            // Re-fit the camera whenever the screen aspect changes (a phone rotation, a desktop
+            // window resize). Without this the FOV stays at the orientation the run started in, so
+            // after rotating to landscape and back the projection is stale: the lake lands in the
+            // wrong corner at the wrong size and the cannon reads as much larger than it should.
+            if (cam != null && !Mathf.Approximately(cam.aspect, lastFitAspect))
+            {
+                lastFitAspect = cam.aspect;
+                FitCamera();
+            }
+
             if (state == State.Playing)
             {
                 UpdatePlaying();
@@ -239,6 +286,14 @@ namespace SnowCannon
             {
                 level++;
                 levelTimer = GameConfig.LevelDuration(level);
+            }
+
+            // The combo decays out once the player stops landing hits. This idle timeout is the
+            // ONLY thing that zeroes the streak; a missed shot never does (it only demotes the tier).
+            if (comboTimer > 0f)
+            {
+                comboTimer -= Time.deltaTime;
+                if (comboTimer <= 0f) { comboStreak = 0; comboTier = 0; comboMissLock = 0; }
             }
 
             // Spawn loop.
@@ -313,7 +368,9 @@ namespace SnowCannon
             x = Mathf.Clamp(x, -usable, usable);
 
             // A healthy base diagonal so they never look like they only march straight down.
-            var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 16f + (level - 1) * 4f));
+            var kind = PickKind(level);
+            var sm = Snowman.Spawn(size, speed, -1, Mathf.Min(30f, 16f + (level - 1) * 4f), kind);
+            sm.SetOwner(this);
             sm.transform.position = new Vector3(x, 0f, z);
             active.Add(sm);
             totalSpawned++;
@@ -322,8 +379,43 @@ namespace SnowCannon
             // build reloads the cannon -- but a snowman that reaches the bottom ends the run.
             if (lake != null) lake.OnSnowmanSpawned();
 #if UNITY_EDITOR
-            if (smokeEnabled) SmokeLog("spawn@" + smokeElapsed.ToString("0.0") + " x=" + x.ToString("0.0"));
+            if (smokeEnabled) SmokeLog("spawn@" + smokeElapsed.ToString("0.0") + " x=" + x.ToString("0.0") + " kind=" + kind);
 #endif
+        }
+
+        /// <summary>Chooses a snowman archetype for the current level. Early levels are pure Runners;
+        /// Tank, Splitter, Banner and Bomber are introduced one per level and their share of the mix
+        /// grows, so the field escalates from a simple march into a tactical blend the player must
+        /// read and prioritise.</summary>
+        SnowmanKind PickKind(int lvl)
+        {
+            if (lvl <= 1) return SnowmanKind.Runner;
+            int runner = 6;
+            int tank = lvl >= 2 ? 3 : 0;
+            int splitter = lvl >= 3 ? 3 : 0;
+            int banner = lvl >= 4 ? 2 : 0;
+            int bomber = lvl >= 5 ? 2 : 0;
+            int total = runner + tank + splitter + banner + bomber;
+            int r = Random.Range(0, total);
+            if ((r -= runner) < 0) return SnowmanKind.Runner;
+            if ((r -= tank) < 0) return SnowmanKind.Tank;
+            if ((r -= splitter) < 0) return SnowmanKind.Splitter;
+            if ((r -= banner) < 0) return SnowmanKind.Banner;
+            return SnowmanKind.Bomber;
+        }
+
+        /// <summary>Spawns one snowman of the given kind at an explicit world position and registers
+        /// it with the director (so it is tracked for breach/cleanup). Used by a Splitter's children,
+        /// which must appear at the parent's spot rather than on the far spawn line.</summary>
+        public Snowman SpawnAt(SnowmanKind kind, Vector3 pos, float size, float speed)
+        {
+            var sm = Snowman.Spawn(size, speed, -1, 30f, kind);
+            sm.SetOwner(this);
+            sm.transform.position = pos;
+            active.Add(sm);
+            totalSpawned++;
+            if (lake != null) lake.OnSnowmanSpawned();
+            return sm;
         }
 
         // ---- game over ----------------------------------------------------------
@@ -363,6 +455,7 @@ namespace SnowCannon
             ConfigureCursorForMenu();
 
             GameSession.EndRun(score, level, hits, survived);
+            comboStreak = 0; comboTier = 0; comboMissLock = 0; comboTimer = 0f;
 
             if (finalScoreText != null)
             {
@@ -389,6 +482,11 @@ namespace SnowCannon
             Snowball.Fire(origin, direction, this);
         }
 
+        /// <summary>Read-only: can the cannon fire right now (the lake still holds water)? Unlike
+        /// <see cref="TryConsumeLake"/> this spends nothing, so it is safe to poll every frame from
+        /// the aim reticle.</summary>
+        public bool CanFireNow => lake == null || lake.CanFire;
+
         /// <summary>The cannon asks before every shot: true only while the lake still holds
         /// water (one mark is spent). When the lake is dry the shot is refused and the basin
         /// flashes. With no lake present (e.g. a bare test scene) firing is unrestricted.</summary>
@@ -410,17 +508,47 @@ namespace SnowCannon
 
         public void RegisterHit(IHitTarget target, int points)
         {
-            score += points;
+            // Advance the streak and refresh the idle window. The tier climbs at most one rung per
+            // kill and never above what the streak has earned; a pending miss-lock (set by a recent
+            // miss) spends one kill before the tier is allowed to climb again.
+            comboStreak++;
+            comboTimer = GameConfig.ComboIdleReset;
+            int desired = GameConfig.TierFromStreak(comboStreak);
+            if (comboMissLock > 0) comboMissLock--;
+            else if (comboTier < desired) comboTier++;
+
+            int mult = GameConfig.TierMultiplier(comboTier);
+            int gained = points * mult;
+            score += gained;
             hits++;
+
+            // Float the earned points (and the multiplier tag) up from the target's world position.
+            var tr = target as Component;
+            if (tr != null && popupRoot != null && cam != null)
+            {
+                Vector2 sp = cam.WorldToScreenPoint(tr.transform.position + Vector3.up * 1.2f);
+                Color pc = comboTier >= 3 ? new Color(1f, 0.45f, 0.85f, 1f)
+                           : comboTier == 2 ? new Color(1f, 0.7f, 0.25f, 1f)
+                           : comboTier == 1 ? new Color(1f, 0.92f, 0.4f, 1f)
+                           : Color.white;
+                ScorePopup.Spawn(popupRoot, sp, mult > 1 ? "+" + gained + "  x" + mult : "+" + gained, pc);
+            }
 #if UNITY_EDITOR
-            if (smokeEnabled) SmokeLog("REGISTERHIT pts=" + points + " hits=" + hits + " score=" + score);
+            if (smokeEnabled) SmokeLog("REGISTERHIT pts=" + gained + " tier=" + comboTier + " hits=" + hits + " score=" + score);
 #endif
             if (AudioDirector.Instance != null)
             {
-                var tr = target as Component;
                 if (tr != null) AudioDirector.Instance.PlayScream(tr.transform.position);
                 AudioDirector.Instance.Vibrate();
             }
+        }
+
+        /// <summary>A fired snowball left the field without connecting: demote the multiplier tier
+        /// one rung (with a one-kill re-earn lock) but leave the streak intact. The streak is only
+        /// ever zeroed by the idle timeout, never by a miss.</summary>
+        public void RegisterMiss()
+        {
+            if (comboTier > 0) { comboTier--; comboMissLock = 1; }
         }
 
         // ---- HUD ----------------------------------------------------------------
@@ -432,6 +560,20 @@ namespace SnowCannon
             var root = Ui.NewRect("root", canvas.transform);
             Ui.Stretch(root);
 
+            // A dedicated high-sort overlay canvas for floating score popups. It uses a constant
+            // pixel size so a popup's anchored position maps 1:1 to screen pixels (the HUD canvas
+            // itself scales with the screen, which would offset raw screen coordinates).
+            var popCanvas = Ui.CreateCanvas("Popups", 20);
+            var popRoot = Ui.NewRect("popupRoot", popCanvas.transform);
+            Ui.Stretch(popRoot);
+            var popScaler = popCanvas.GetComponent<CanvasScaler>();
+            if (popScaler != null)
+            {
+                popScaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+                popScaler.scaleFactor = 1f;
+            }
+            popupRoot = popRoot;
+
             // Top-right scoreboard.
             var board = Ui.NewRect("board", root);
             Ui.Place(board, new Vector2(1f, 1f), new Vector2(1f, 1f),
@@ -442,6 +584,7 @@ namespace SnowCannon
             timeText = AddLine(board, "time", 46, new Vector2(-16f, -84f));
             scoreText = AddLine(board, "score", 34, new Vector2(-16f, -140f));
             waterText = AddLine(board, "water", 30, new Vector2(-16f, -188f));
+            comboText = AddLine(board, "combo", 30, new Vector2(-16f, -232f));
 
             // Centre game-over card, hidden until the run ends.
             var over = Ui.NewRect("gameover", root);
@@ -489,6 +632,18 @@ namespace SnowCannon
                 waterText.color = m <= 0 ? new Color(1f, 0.4f, 0.36f, 1f)
                              : m <= 10 ? new Color(1f, 0.82f, 0.32f, 1f)
                              : Color.white;
+            }
+            if (comboText != null)
+            {
+                if (comboTier > 0)
+                {
+                    int m = GameConfig.TierMultiplier(comboTier);
+                    comboText.text = "COMBO  x" + m;
+                    comboText.color = comboTier >= 3 ? new Color(1f, 0.45f, 0.85f, 1f)
+                                    : comboTier == 2 ? new Color(1f, 0.7f, 0.25f, 1f)
+                                    : new Color(1f, 0.92f, 0.4f, 1f);
+                }
+                else comboText.text = "";
             }
         }
 
