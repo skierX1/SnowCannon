@@ -557,7 +557,7 @@ namespace SnowCannon
 
             Vector3 center = target.transform.position + new Vector3(0f, 1.0f, 0f);
             Vector3 origin = cannon != null ? cannon.MuzzleWorldPosition : new Vector3(0f, 1.4f, -4f);
-            Vector3 dir = BallisticDir(origin, center, GameConfig.SnowballSpeed, GameConfig.SnowballGravity);
+            Vector3 dir = BallisticDir(origin, center, Snowball.LaunchSpeed, Snowball.Gravity);
             SpawnSnowball(origin, dir);
         }
 

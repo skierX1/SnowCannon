@@ -77,8 +77,10 @@ namespace SnowCannon
             stickRadius = minDim * 0.17f;
             fireRadius = minDim * 0.15f;
             travel = stickRadius * 0.9f;
-            stickCenter = new Vector2(w * 0.30f, bottomY);
-            fireCenter = new Vector2(w * 0.70f, bottomY);
+            // The stick sits a third of the way across the screen and the fire button two thirds,
+            // so both are clear of the cannon in the middle and reachable by a thumb at the bottom.
+            stickCenter = new Vector2(w / 3f, bottomY);
+            fireCenter = new Vector2(w * 2f / 3f, bottomY);
 
             BuildStick(root);
             BuildFire(root);
