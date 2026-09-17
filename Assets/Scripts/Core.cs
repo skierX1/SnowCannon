@@ -20,6 +20,11 @@ namespace SnowCannon
     /// pick; Endless is a single ever-harder run scored against the local leaderboard.</summary>
     public enum GameMode { Classic, Endless }
 
+    /// <summary>The aiming aid shown while the barrel tracks. Exactly one is active at a time:
+    /// the flat ground landing reticle (a point on the snow), or the shimmering trajectory ribbon
+    /// tracing the last third of the shot's arc. Chosen from the options menu.</summary>
+    public enum AimGuide { GroundReticle, Trajectory }
+
     /// <summary>
     /// Central tuning values for the whole game. World convention: the camera sits at
     /// negative Z and looks toward positive Z, so snowmen spawn far away (large Z) and
@@ -241,7 +246,7 @@ namespace SnowCannon
         const string KeyVolume = "sc_volume";
         const string KeyCannonSound = "sc_cannon_sound";
         const string KeySnowmanSound = "sc_snowman_sound";
-        const string KeyAimReticle = "sc_aim_reticle";
+        const string KeyAimGuide = "sc_aim_guide";
 
         public const int QualityLevelCount = 3;
 
@@ -289,12 +294,17 @@ namespace SnowCannon
             set { PlayerPrefs.SetInt(KeyInvertY, value ? 1 : 0); }
         }
 
-        /// <summary>Whether the ballistic landing reticle (the ground marker showing where a shot
-        /// would touch down) is shown while aiming. On by default; toggled from the options menu.</summary>
-        public static bool AimReticle
+        /// <summary>Which aiming aid is shown while the barrel tracks: the flat ground landing
+        /// reticle, or the shimmering trajectory ribbon tracing the last third of the arc. Exactly
+        /// one is active at a time; cycled from the options menu. The ground reticle is the default.</summary>
+        public static AimGuide AimGuideMode
         {
-            get { return PlayerPrefs.GetInt(KeyAimReticle, 1) != 0; }
-            set { PlayerPrefs.SetInt(KeyAimReticle, value ? 1 : 0); }
+            get
+            {
+                int v = PlayerPrefs.GetInt(KeyAimGuide, (int)AimGuide.GroundReticle);
+                return v == (int)AimGuide.Trajectory ? AimGuide.Trajectory : AimGuide.GroundReticle;
+            }
+            set { PlayerPrefs.SetInt(KeyAimGuide, (int)value); }
         }
 
         /// <summary>Master volume, a continuous 0..1 value driven by the menu slider.</summary>

@@ -31,7 +31,9 @@ namespace SnowCannon
         bool refreshingVolume;
         Text snowmanSoundValue;
         Text cannonSoundValue;
-        Text reticleLabel;
+        Text aimGuideLabel;
+        Text titleText;
+        float titlePhase;
 
         // Keyboard navigation for desktop players: the arrow keys (or WASD) move a focus ring
         // across the currently visible panel's buttons; Enter / Space presses the focused one.
@@ -80,11 +82,33 @@ namespace SnowCannon
             // cursor every frame here. This is the fix for the pointer vanishing on the menu.
             EnsureCursorVisible();
 
-            // ESC leaves the game from the title screen too, mirroring the play scene.
+            // A slow icy shimmer on the title: breathe the frosted core colour between near-white and a
+            // faint cyan so the letters glint like sun on fresh snow, kept subtle to stay legible.
+            if (titleText != null)
+            {
+                titlePhase += Time.deltaTime * 1.6f;
+                float s = 0.5f + 0.5f * Mathf.Sin(titlePhase);
+                titleText.color = Color.Lerp(new Color(0.90f, 0.96f, 1.00f, 1f),
+                                             new Color(0.72f, 0.92f, 1.00f, 1f), s);
+            }
+
+            // ESC unwinds one menu level at a time (sound -> options -> main) and only quits from the
+            // top-level title screen, so it never yanks the player straight out of the app.
             if (UnityEngine.InputSystem.Keyboard.current != null &&
                 UnityEngine.InputSystem.Keyboard.current.escapeKey.wasPressedThisFrame)
             {
-                GameFlow.Quit();
+                if (soundPanel != null && soundPanel.activeSelf)
+                {
+                    soundPanel.SetActive(false);
+                    optionsPanel.SetActive(true);
+                    highScorePanel.SetActive(false);
+                }
+                else if (optionsPanel != null && optionsPanel.activeSelf)
+                    ShowMain();
+                else if (highScorePanel != null && highScorePanel.activeSelf)
+                    ShowMain();
+                else
+                    GameFlow.Quit();
                 return;
             }
 
@@ -422,10 +446,20 @@ namespace SnowCannon
 
         void BuildTitle()
         {
-            var title = Ui.AddText(root, "title", "SNOW  CANNON", 92, GameConfig.CannonYellow,
-                                  TextAnchor.MiddleCenter);
-            Ui.Place(Ui.Rt(title.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+            // A frosted-ice treatment: a near-white icy core for maximum legibility, a crisp deep-blue
+            // outline for a chiselled edge, and a soft offset blue shadow for a bevelled, frozen depth.
+            titleText = Ui.AddText(root, "title", "SNOW  CANNON", 92,
+                                  new Color(0.90f, 0.96f, 1.00f, 1f), TextAnchor.MiddleCenter);
+            Ui.Place(Ui.Rt(titleText.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                      new Vector2(0f, -70f), new Vector2(900f, 130f));
+
+            var outline = titleText.gameObject.AddComponent<UnityEngine.UI.Outline>();
+            outline.effectColor = new Color(0.05f, 0.18f, 0.38f, 1f);
+            outline.effectDistance = new Vector2(2f, 2f);
+
+            var shadow = titleText.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+            shadow.effectColor = new Color(0.10f, 0.30f, 0.55f, 0.85f);
+            shadow.effectDistance = new Vector2(0f, -3f);
 
             var sub = Ui.AddText(root, "sub", "blast the snowmen before they reach you", 30,
                                 new Color(0.1f, 0.2f, 0.3f, 1f), TextAnchor.MiddleCenter);
@@ -521,8 +555,11 @@ namespace SnowCannon
             Ui.AddPanel(Ui.Rt(optionsPanel), "dim", new Color(0f, 0f, 0.05f, 0.6f), false);
 
             var card = Ui.NewRect("card", Ui.Rt(optionsPanel));
+            // The card grows on mobile because the VIBRATION row is added there, so the rows (and the
+            // BACK button beneath them) still have room without crowding.
+            float cardH = s_mobile ? 640f : 520f;
             Ui.Place(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     Vector2.zero, new Vector2(620f, 520f));
+                     Vector2.zero, new Vector2(620f, cardH));
             Ui.AddPanel(card, "bg", new Color(0.06f, 0.13f, 0.21f, 0.96f), false);
 
             var head = Ui.AddText(card, "head", "OPTIONS", 52, GameConfig.CannonYellow, TextAnchor.MiddleCenter);
@@ -532,8 +569,9 @@ namespace SnowCannon
             soundLabel = AddToggleRow(card, "sound", "SOUND", 0, OnOpenSound);
             musicLabel = AddToggleRow(card, "music", "MUSIC", 1, OnToggleMusic);
             qualityLabel = AddToggleRow(card, "quality", "QUALITY", 2, OnCycleQuality);
-            // The ballistic landing reticle can be shown or hidden from here (on by default).
-            reticleLabel = AddToggleRow(card, "reticle", "AIM RETICLE", 3, OnToggleReticle);
+            // The aiming aid cycles here between the flat ground landing reticle and the shimmering
+            // trajectory ribbon -- exactly one is shown at a time.
+            aimGuideLabel = AddToggleRow(card, "aimguide", "AIM GUIDE", 3, OnCycleAimGuide);
             // Vibration only means something on a phone/tablet; hide the row on desktop.
             if (s_mobile)
                 vibrationLabel = AddToggleRow(card, "vibration", "VIBRATION", 4, OnToggleVibration);
@@ -731,7 +769,7 @@ namespace SnowCannon
         }
         void OnToggleMusic() { Settings.Music = !Settings.Music; if (AudioDirector.Instance != null) AudioDirector.Instance.ApplySettings(); RefreshOptionLabels(); }
         void OnToggleVibration() { Settings.Vibration = !Settings.Vibration; RefreshOptionLabels(); }
-        void OnToggleReticle() { Settings.AimReticle = !Settings.AimReticle; RefreshOptionLabels(); }
+        void OnCycleAimGuide() { Settings.AimGuideMode = Settings.AimGuideMode == AimGuide.GroundReticle ? AimGuide.Trajectory : AimGuide.GroundReticle; RefreshOptionLabels(); }
         void OnCycleQuality() { Settings.Quality = (Settings.Quality + 1) % Settings.QualityLevelCount; RefreshOptionLabels(); }
         void OnResetHighScore() { Settings.ResetHighScore(); if (highScoreValue != null) highScoreValue.text = "0"; }
 
@@ -740,7 +778,7 @@ namespace SnowCannon
             if (soundLabel != null) soundLabel.text = Settings.Sound ? "ON" : "OFF";
             if (musicLabel != null) musicLabel.text = Settings.Music ? "ON" : "OFF";
             if (vibrationLabel != null) vibrationLabel.text = Settings.Vibration ? "ON" : "OFF";
-            if (reticleLabel != null) reticleLabel.text = Settings.AimReticle ? "ON" : "OFF";
+            if (aimGuideLabel != null) aimGuideLabel.text = Settings.AimGuideMode == AimGuide.Trajectory ? "TRAJECTORY" : "RETICLE";
             if (qualityLabel != null)
             {
                 string[] names = { "LOW", "MEDIUM", "HIGH" };

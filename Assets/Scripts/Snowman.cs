@@ -758,6 +758,28 @@ namespace SnowCannon
             return true;
         }
 
+        /// <summary>Called when the snowman wanders into the lake, its grass bank, or the supply
+        /// hose. It is NOT a breach -- the figure simply collapses DOWN into the water and fades
+        /// out, so reaching the pond removes the threat without ending the run. Mirrors the shot
+        /// death's chunk detach but with a downward, inward velocity so the stack sinks rather than
+        /// bursting outward.</summary>
+        public void Melt()
+        {
+            if (IsDying || IsDone) return;
+            IsDying = true;
+            fadeTimer = 0f;
+
+            foreach (var c in chunks)
+            {
+                c.detached = true;
+                c.transform.SetParent(null, true);
+                // A gentle sink: a little inward drift, a downward push, a lazy tumble. UpdateDeath
+                // adds gravity and fades the alpha, so the stack dissolves as it drops into the pond.
+                c.velocity = new Vector3(Random.Range(-0.25f, 0.25f), Random.Range(-1.4f, -0.5f), Random.Range(-0.25f, 0.25f));
+                c.angularVelocity = new Vector3(Random.Range(-90f, 90f), Random.Range(-90f, 90f), Random.Range(-90f, 90f));
+            }
+        }
+
         void UpdateDeath()
         {
             fadeTimer += Time.deltaTime;

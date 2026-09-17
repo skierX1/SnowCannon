@@ -109,6 +109,10 @@ namespace SnowCannon
         Transform legL, legR, poleL, poleR;
         Transform head;
         float despawnX;
+        // Overall figure scale (kept from Build) and the head's rest position, so the stride can bob
+        // the head in proportion to the figure's size.
+        float h;
+        Vector3 headBasePos;
 
         // Death animation state: the figure cartwheels away and fades out.
         float deathTimer;
@@ -145,11 +149,13 @@ namespace SnowCannon
             mats.Add(suitMat); mats.Add(skinMat); mats.Add(skiMat); mats.Add(poleMat);
 
             float h = Random.Range(0.85f, 1.15f);   // overall size variation
+            this.h = h;
 
             // Torso.
             Part(PrimitiveType.Capsule, suitMat, new Vector3(0, 0.9f * h, 0), new Vector3(0.34f * h, 0.5f * h, 0.28f * h));
             // Head (kept as a handle so the death animation can spin it comically).
             head = Part(PrimitiveType.Sphere, skinMat, new Vector3(0, 1.42f * h, 0), Vector3.one * (0.3f * h));
+            headBasePos = head.localPosition;
             // A cap.
             Part(PrimitiveType.Sphere, suitMat, new Vector3(0, 1.5f * h, 0), Vector3.one * (0.26f * h));
 
@@ -212,13 +218,33 @@ namespace SnowCannon
             p.x += dir * speed * Time.deltaTime;
             transform.position = p;
 
-            // A gentle ski glide: legs and poles swing in antiphase.
-            glidePhase += Time.deltaTime * 6f;
-            float swing = Mathf.Sin(glidePhase) * 22f;
-            if (legL != null) legL.localEulerAngles = new Vector3(swing, 0f, 0f);
-            if (legR != null) legR.localEulerAngles = new Vector3(-swing, 0f, 0f);
-            if (poleL != null) poleL.localEulerAngles = new Vector3(-swing * 0.8f, 0f, 0f);
-            if (poleR != null) poleR.localEulerAngles = new Vector3(swing * 0.8f, 0f, 0f);
+            // A classic-diagonal cross-country stride, not a walk: a long forward leg reach with a
+            // quick recovery, the opposite pole planted backward on the diagonal, and a subtle head
+            // bob on the push-off. The cycle is warped so the forward stroke is long and the recovery
+            // short -- the asymmetry is exactly what separates a gliding skier from a plodding walker.
+            glidePhase += Time.deltaTime * 7.5f;
+            float u = glidePhase * 0.15915494f;   // /(2*PI)
+            u -= Mathf.Floor(u);                  // 0..1 position within the stride cycle
+            float drive;                          // +1 = leg fully forward, small negative = quick recovery
+            if (u < 0.62f) drive = Mathf.Sin(u / 0.62f * Mathf.PI);
+            else drive = -Mathf.Sin((u - 0.62f) / 0.38f * Mathf.PI) * 0.42f;
+
+            const float Reach = 44f, PoleAmp = 60f;
+            float legAng = Reach * drive;
+            if (legL != null) legL.localEulerAngles = new Vector3(legAng, 0f, 0f);
+            if (legR != null) legR.localEulerAngles = new Vector3(-legAng, 0f, 0f);
+            // Poles drive backward (negative) opposite their own-side leg -- the diagonal plant.
+            float poleAng = PoleAmp * drive;
+            if (poleL != null) poleL.localEulerAngles = new Vector3(-poleAng - 10f, 0f, 0f);
+            if (poleR != null) poleR.localEulerAngles = new Vector3(poleAng - 10f, 0f, 0f);
+            // A subtle head bob + forward lean synced to the push-off, scaled to the figure's size.
+            if (head != null)
+            {
+                var hp = headBasePos;
+                hp.y += 0.02f * h * drive;
+                hp.z += 0.03f * h * Mathf.Max(0f, drive);
+                head.localPosition = hp;
+            }
 
             // Only ever despawn once fully off the visible edge, never mid-screen.
             if (Mathf.Abs(p.x) > despawnX) IsDone = true;

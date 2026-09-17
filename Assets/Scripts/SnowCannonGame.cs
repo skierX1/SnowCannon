@@ -199,6 +199,11 @@ namespace SnowCannon
             // down. It is hidden while the lake is dry or when the option is off.
             AimReticle.Create(transform, cam, cannon, this);
 
+            // The glowing trajectory preview traces the last third of the arc a shot would fly, so the
+            // player can read the incoming descent before committing. Hidden while the lake is dry or
+            // when the option is off.
+            TrajectoryPreview.Create(transform, cam, cannon, this);
+
             // The 3D water pond lives in the world (bottom-left of the field) and feeds the cannon
             // through a yellow hose that runs along the bottom of the screen.
             lake = Lake.Create(transform, cam);
@@ -420,7 +425,7 @@ namespace SnowCannon
             GameRuntime.FieldSlow = Mathf.Clamp01(RunUpgrades.FieldSlowBase + bslow +
                                                  (blizzardChill > 0f ? GameConfig.BlizzardChillAmount : 0f));
 
-            // Shot-select hotkeys (1/2/3 arm the premium shots, 0/` returns to basic).
+            // Shot-select hotkeys (1/2/3/4 arm BASIC / SPRAY / LANCE / BLIZZARD).
             PollShotSelect();
 
             // Friendlies (kids / penguins) toddle across the near field on a lazy cadence.
@@ -455,13 +460,19 @@ namespace SnowCannon
                     continue;
                 }
 
-                // The run ends the instant a live snowman reaches the cannon, the lake (with its
-                // grass bank), or the supply hose — not only when it crosses the defeat line. The
-                // proximity test is done here (the director owns the geometry) rather than via physics
-                // colliders, so it is deterministic and cannot be missed by a fast-moving snowman.
+                // A snowman that wanders into the lake (or its grass bank / the supply hose) is not a
+                // breach -- it simply melts into the water and is gone. Only reaching the defeat line
+                // or the cannon itself ends the run. The proximity tests are done here (the director
+                // owns the geometry) rather than via physics colliders, so they are deterministic and
+                // cannot be missed by a fast-moving snowman.
                 if (!sm.IsDying)
                 {
                     var sp = sm.transform.position;
+                    if (lake != null && lake.TouchesSnowman(sp, sm.FootprintRadius))
+                    {
+                        sm.Melt();
+                        continue;
+                    }
                     bool breach = sp.z <= GameConfig.DefeatZ;
                     if (!breach && cannon != null)
                     {
@@ -470,7 +481,6 @@ namespace SnowCannon
                         float cdx = sp.x - cp.x, cdz = sp.z - cp.z;
                         if (cdx * cdx + cdz * cdz <= rr * rr) breach = true;
                     }
-                    if (!breach && lake != null && lake.TouchesSnowman(sp, sm.FootprintRadius)) breach = true;
                     if (breach)
                     {
                         if (objective != null) objective.OnBreach();
@@ -713,16 +723,16 @@ namespace SnowCannon
 
         // ---- Tier 2 / Tier 3 systems ------------------------------------------
 
-        /// <summary>Reads the shot-select hotkeys. 1/2/3 arm SPRAY / LANCE / BLIZZARD, 0 returns to
-        /// BASIC. Touch players use the on-screen shot buttons instead (see BuildHud).</summary>
+        /// <summary>Reads the shot-select hotkeys. 1/2/3/4 arm BASIC / SPRAY / LANCE / BLIZZARD.
+        /// Touch players use the on-screen shot buttons instead (see BuildHud).</summary>
         void PollShotSelect()
         {
             var kb = UnityEngine.InputSystem.Keyboard.current;
             if (kb == null) return;
-            if (kb.digit1Key.wasPressedThisFrame) SelectShot(ShotType.Spray);
-            else if (kb.digit2Key.wasPressedThisFrame) SelectShot(ShotType.IceLance);
-            else if (kb.digit3Key.wasPressedThisFrame) SelectShot(ShotType.Blizzard);
-            else if (kb.digit0Key.wasPressedThisFrame) SelectShot(ShotType.Basic);
+            if (kb.digit1Key.wasPressedThisFrame) SelectShot(ShotType.Basic);
+            else if (kb.digit2Key.wasPressedThisFrame) SelectShot(ShotType.Spray);
+            else if (kb.digit3Key.wasPressedThisFrame) SelectShot(ShotType.IceLance);
+            else if (kb.digit4Key.wasPressedThisFrame) SelectShot(ShotType.Blizzard);
         }
 
         /// <summary>Spawns the kids / penguins that waddle across the near field on a lazy cadence.
@@ -949,7 +959,7 @@ namespace SnowCannon
             {
                 var s = shots[i];
                 var captured = s;
-                string label = (ShotDefs.Hotkey(s) == 0 ? "" : ShotDefs.Hotkey(s) + " ") + ShotDefs.Label(s);
+                string label = ShotDefs.Hotkey(s) + " " + ShotDefs.Label(s);
                 var btn = Ui.AddButton(root, "shot_" + s, label, new Vector2(bw, bh), 22,
                     new Color(0.1f, 0.24f, 0.4f, 1f), () => SelectShot(captured));
                 Ui.Place(Ui.Rt(btn.gameObject), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
