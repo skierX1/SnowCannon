@@ -548,7 +548,8 @@ namespace SnowCannon
 
             if (controls.IsFireHeld() && cooldown <= 0f && jamTimer <= 0f)
             {
-                cooldown = GameConfig.FireCooldown;
+                // The RAPID FIRE upgrade shortens the interval between shots.
+                cooldown = GameConfig.FireCooldown * RunUpgrades.FireRateMult;
                 Fire();
             }
         }
@@ -593,15 +594,33 @@ namespace SnowCannon
         void Fire()
         {
             if (game == null) return;
-            // Spend a mark of lake water; if the lake has run dry the shot is refused (the basin
-            // flashes) until snowmen keep arriving to refill it.
-            if (!game.TryConsumeLake()) return;
+
+            // The director owns which shot is armed (basic / spray / lance / blizzard). Premium shots
+            // cost extra lake water but clear clusters, punch a line, or chill the field.
+            ShotType shot = game.ArmedShot;
+            int cost = Mathf.Max(1, Mathf.CeilToInt(ShotDefs.WaterCost(shot) * RunUpgrades.WaterCostMult));
+            if (!game.TryConsumeLakeMarks(cost)) return;
+
             // Launch along the barrel's actual 3D facing (yaw + elevation). Gravity in Snowball
             // then curves it into a ballistic arc, so the angle the player set decides the range.
             Vector3 dir = AimDirection;
             if (dir.sqrMagnitude < 0.0001f) dir = Vector3.forward;
             dir = dir.normalized;
-            game.SpawnSnowball(MuzzleWorldPosition + dir * 0.4f, dir);
+
+            int count = Mathf.Max(1, ShotDefs.Count(shot));
+            float spread = ShotDefs.SpreadDeg(shot);
+            int pierce = ShotDefs.Pierce(shot);
+            bool chills = ShotDefs.Chills(shot);
+            Color tint = ShotDefs.Tint(shot);
+
+            Vector3 origin = MuzzleWorldPosition + dir * 0.4f;
+            for (int i = 0; i < count; i++)
+            {
+                // Fan the volley symmetrically about the barrel by rotating around world up.
+                float off = count <= 1 ? 0f : Mathf.Lerp(-spread * 0.5f, spread * 0.5f, i / (float)(count - 1));
+                Vector3 d = off == 0f ? dir : Quaternion.Euler(0f, off, 0f) * dir;
+                game.SpawnSnowballPremium(origin, d, pierce, chills, tint);
+            }
             game.PlayThrowAt(transform.position);
 
             // Kick the drum and puff snow out of the mouth.

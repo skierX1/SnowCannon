@@ -16,6 +16,13 @@ namespace SnowCannon
         bool scored;
         SnowCannonGame game;
 
+        // Premium-shot state. `pierceLeft` is how many more targets this ball may punch through before
+        // it is spent (1 for a normal ball, more for a DEEP PIERCE lance). `chills` marks a blizzard
+        // ball, which slows the whole field on impact. `tint` recolours the projectile per shot type.
+        int pierceLeft = 1;
+        bool chills;
+        Color tint = GameConfig.SnowWhite;
+
         // Random tumble: each snowball gets its own spin axis and rate at launch so the
         // speckled surface catches the light differently and the shot reads as a real packed
         // snowball rather than a silently sliding sphere.
@@ -42,7 +49,8 @@ namespace SnowCannon
         // Horizontal despawn bound, likewise generous versus the logical field width (see Update).
         const float DespawnHalfWidth = 40f;
 
-        public static Snowball Fire(Vector3 origin, Vector3 direction, SnowCannonGame owner)
+        public static Snowball Fire(Vector3 origin, Vector3 direction, SnowCannonGame owner,
+                                    int pierce = 1, bool chills = false, Color tint = default)
         {
             // A primitive sphere ships with a mesh + sphere collider already attached, so we
             // reuse those (the built-in extra-mesh API is gone in 6.6).
@@ -53,6 +61,9 @@ namespace SnowCannon
             sb.game = owner;
             sb.velocity = direction.normalized * LaunchSpeed;
             sb.life = LifeTime;
+            sb.pierceLeft = Mathf.Max(1, pierce);
+            sb.chills = chills;
+            sb.tint = tint == default(Color) ? GameConfig.SnowWhite : tint;
 
             // onUnitSphere is already normalised, so no extra divide; the rate is randomised
             // per shot so a volley never tumbles in lockstep.
@@ -60,13 +71,14 @@ namespace SnowCannon
             sb.spinSpeed = Random.Range(180f, 540f);
 
             var r = go.GetComponent<MeshRenderer>();
-            r.material = Mat.Textured(TextureFactory.SnowballSnow(), GameConfig.SnowWhite);
+            r.material = Mat.Textured(TextureFactory.SnowballSnow(), sb.tint);
             // A lumpy, hand-packed shape instead of a perfect sphere; the collider stays a
             // unit sphere so hit detection is unchanged.
             var mf = go.GetComponent<MeshFilter>();
             if (mf != null) mf.sharedMesh = MeshFactory.LumpySnowball(Random.Range(0, 100000));
-            // Unit sphere (local radius 0.5): scale so the world radius matches SnowballRadius.
-            go.transform.localScale = Vector3.one * (GameConfig.SnowballRadius * 2f);
+            // Unit sphere (local radius 0.5): scale so the world radius matches SnowballRadius,
+            // grown by the BIG SNOWBALLS upgrade so a bigger ball is easier to land.
+            go.transform.localScale = Vector3.one * (GameConfig.SnowballRadius * 2f * RunUpgrades.SnowballSizeMult);
 
             var col = go.GetComponent<SphereCollider>();
             col.radius = 0.5f;
@@ -91,8 +103,11 @@ namespace SnowCannon
             if (step <= 0f) { Despawn(); return; }
 
             // Ballistic: gravity bends the flight into an arc, so a too-flat shot sails over a
-            // snowman and a too-steep one drops short. Applied after this frame's cast.
+            // snowman and a too-steep one drops short. Applied after this frame's cast. The wind
+            // (set by the WeatherDirector) adds a lateral acceleration that curves the shot, so the
+            // player must lead into the gust.
             velocity.y -= Gravity * Time.deltaTime;
+            velocity += GameRuntime.Wind * Time.deltaTime;
 
             // A sphere cast along this frame's motion, so fast snowballs never tunnel through
             // a snowman between two frames. (6.6 orders the out-hit before the max distance.)
@@ -139,6 +154,19 @@ namespace SnowCannon
             bool counted = target.Hit(point, out points);
             if (counted && game != null) game.RegisterHit(target, points);
             if (game != null) game.PlayPopAt(point);
+
+            // A blizzard ball chills the field on impact, briefly slowing the whole march.
+            if (chills && game != null) game.ApplyBlizzardChill();
+
+            // A piercing ball (DEEP PIERCE lance) punches through and keeps flying; a normal ball
+            // is spent on its first connect.
+            pierceLeft--;
+            if (pierceLeft > 0)
+            {
+                // Nudge past the target we just clipped so the cast does not immediately re-hit it.
+                transform.position += velocity.normalized * (GameConfig.SnowballRadius * 1.4f);
+                return;
+            }
             Despawn();
         }
 

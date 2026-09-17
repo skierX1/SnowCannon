@@ -58,6 +58,38 @@ namespace SnowCannon
         int totalSpawned;
         int snowballsFired;
 
+        // ---- Tier 2 / Tier 3 run state ---------------------------------------
+        GameMode mode = GameMode.Classic;
+        ShotType armedShot = ShotType.Basic;
+
+        // The every-fifth-level boss, tracked separately from the marching `active` list.
+        Boss boss;
+
+        // The current level's optional objective (Classic mode).
+        Objective objective;
+
+        // The weather director that drives the shared GameRuntime wind / visibility / field-slow.
+        WeatherDirector weather;
+
+        // Friendly targets (kids / penguins) that cross the near field; hitting them is penalised.
+        readonly List<Friendly> friendlies = new List<Friendly>();
+        float friendlyTimer = 6f;
+
+        // Hit-stop juice: a brief global time-scale dip on a kill.
+        float hitStopTimer;
+
+        // The level-up overlay currently shown (null when not paused for a pick).
+        LevelUpUI levelUpUI;
+
+        // HUD extras added by the Tier 2/3 features.
+        Text objectiveText;
+        Text shotText;
+        Image dangerVignette;
+        Text bossText;
+        Image bossBarImage;
+        GameObject bossBarGo;
+        readonly List<Button> shotButtons = new List<Button>();
+
         // Round-robin lane counter so spawns are dealt out evenly across the field width
         // instead of leaving the horizontal spread to chance (which clumps them centrally).
         int spawnLane;
@@ -88,6 +120,61 @@ namespace SnowCannon
 
         /// <summary>Called when a Bomber's shot lands near the cannon: briefly jams the firing.</summary>
         public void JamCannon(float t) { if (cannon != null) cannon.Jam(t); }
+
+        /// <summary>The shot the player has armed (basic / spray / lance / blizzard). Read by the
+        /// cannon's fire path to pick the volley size, spread, pierce, chill and water cost.</summary>
+        public ShotType ArmedShot => armedShot;
+
+        /// <summary>Arms a premium shot for the next trigger pull. Clamps to Basic if the lake cannot
+        /// even cover its cheapest possible cost, so the player is never stuck on an unaffordable shot.</summary>
+        public void SelectShot(ShotType t)
+        {
+            armedShot = t;
+            RefreshShotHud();
+        }
+
+        /// <summary>Spends a specific number of lake marks (premium shots cost more than one). Returns
+        /// false and flashes the basin when the lake cannot cover the cost.</summary>
+        public bool TryConsumeLakeMarks(int cost)
+        {
+            if (lake == null) return true;
+            return lake.OnFireAttemptMarks(cost);
+        }
+
+        /// <summary>Launches a premium snowball (piercing / chilling / tinted). The basic path keeps
+        /// using <see cref="SpawnSnowball"/> so existing callers are unaffected.</summary>
+        public void SpawnSnowballPremium(Vector3 origin, Vector3 direction, int pierce, bool chills, Color tint)
+        {
+            if (state != State.Playing) return;
+            snowballsFired++;
+            Snowball.Fire(origin, direction, this, pierce, chills, tint);
+        }
+
+        /// <summary>A blizzard ball connected: briefly chill the whole field beyond the weather baseline.</summary>
+        public void ApplyBlizzardChill() { blizzardChill = GameConfig.BlizzardChillTime; }
+        float blizzardChill;
+
+        /// <summary>A snowball hit a friendly (kid / penguin): deduct points and spill lake water, so
+        /// wild spraying into the near field is punished.</summary>
+        public void RegisterFriendlyHit()
+        {
+            score = Mathf.Max(0, score - GameConfig.FriendlyPenaltyPoints);
+            if (lake != null) lake.OnFireAttemptMarks(GameConfig.FriendlyPenaltyWater);
+            if (popupRoot != null && cam != null)
+            {
+                // Float the penalty from wherever the friendly was; the caller already played a pop.
+            }
+            if (AudioDirector.Instance != null) AudioDirector.Instance.PlayThrow();
+        }
+
+        /// <summary>The boss lobs a volley of jamming shells at the cannon.</summary>
+        public void BossLobVolley(Vector3 from)
+        {
+            int n = Random.Range(2, 4);
+            for (int i = 0; i < n; i++)
+                BomberShot.Launch(from + Vector3.up * 2f + new Vector3(Random.Range(-1f, 1f), 0f, Random.Range(-1f, 1f)),
+                                  CannonWorldPos, this);
+        }
 
         void Awake()
         {
@@ -135,6 +222,19 @@ namespace SnowCannon
             comboTimer = 0f;
             levelTimer = GameConfig.LevelDuration(level);
             spawnTimer = 0.6f; // a short grace beat before the first snowman
+
+            // ---- Tier 2 / Tier 3 run set-up -------------------------------------
+            mode = Settings.Mode;
+            armedShot = ShotType.Basic;
+            GameRuntime.Reset();
+            RunUpgrades.ResetRun(Settings.PermComboBoost, Settings.PermExtraWater);
+            // Fold the RESERVE WATER upgrade / meta head-start into the lake's opening level.
+            if (lake != null) lake.GrantMarks(RunUpgrades.ExtraWater);
+            weather = WeatherDirector.Attach(transform);
+            objective = mode == GameMode.Classic ? Objective.Roll(level) : null;
+            friendlyTimer = 7f;
+            hitStopTimer = 0f;
+            boss = null;
 
             // Every run gets one of the four background tunes, chosen at random.
             if (AudioDirector.Instance != null) AudioDirector.Instance.PlayRandomMusic();
@@ -259,6 +359,15 @@ namespace SnowCannon
                 FitCamera();
             }
 
+            // Hit-stop juice: a brief global time-scale dip on a kill. Counted on unscaled time so it
+            // always drains even while the field is slowed, then the shared time-scale is recomposed.
+            if (hitStopTimer > 0f)
+            {
+                hitStopTimer -= Time.unscaledDeltaTime;
+                if (hitStopTimer < 0f) hitStopTimer = 0f;
+            }
+            ApplyTimeScale();
+
             if (state == State.Playing)
             {
                 UpdatePlaying();
@@ -267,6 +376,15 @@ namespace SnowCannon
             {
                 UpdateGameOver();
             }
+        }
+
+        /// <summary>The single authority over Time.timeScale: the level-up overlay freezes the game,
+        /// otherwise a pending hit-stop slows it, otherwise it runs at full speed.</summary>
+        void ApplyTimeScale()
+        {
+            if (levelUpUI != null) Time.timeScale = 0f;
+            else if (hitStopTimer > 0f) Time.timeScale = GameConfig.HitStopScale;
+            else Time.timeScale = 1f;
         }
 
         void UpdatePlaying()
@@ -280,13 +398,33 @@ namespace SnowCannon
                 return;
             }
 
-            // Level timer, then auto-advance to a longer, faster level.
+            // Level timer, then auto-advance to a longer, faster level. In Classic mode a level
+            // boundary pauses the game and offers a choice of three upgrades; Endless just hardens.
             levelTimer -= Time.deltaTime;
             if (levelTimer <= 0f)
             {
+                if (mode == GameMode.Classic)
+                {
+                    CompleteObjective();
+                    TriggerLevelUp();
+                    return;
+                }
                 level++;
                 levelTimer = GameConfig.LevelDuration(level);
+                MaybeSpawnBoss();
             }
+
+            // Compose the field slow from the upgrade baseline, the blizzard and any ball-chill.
+            if (blizzardChill > 0f) blizzardChill -= Time.deltaTime;
+            float bslow = weather != null ? weather.BlizzardSlow : 0f;
+            GameRuntime.FieldSlow = Mathf.Clamp01(RunUpgrades.FieldSlowBase + bslow +
+                                                 (blizzardChill > 0f ? GameConfig.BlizzardChillAmount : 0f));
+
+            // Shot-select hotkeys (1/2/3 arm the premium shots, 0/` returns to basic).
+            PollShotSelect();
+
+            // Friendlies (kids / penguins) toddle across the near field on a lazy cadence.
+            UpdateFriendlies();
 
             // The combo decays out once the player stops landing hits. This idle timeout is the
             // ONLY thing that zeroes the streak; a missed shot never does (it only demotes the tier).
@@ -335,11 +473,14 @@ namespace SnowCannon
                     if (!breach && lake != null && lake.TouchesSnowman(sp, sm.FootprintRadius)) breach = true;
                     if (breach)
                     {
+                        if (objective != null) objective.OnBreach();
                         GameOver(false);
                         return;
                     }
                 }
             }
+
+            UpdateBoss();
 
             RefreshHud();
         }
@@ -456,12 +597,18 @@ namespace SnowCannon
 
             GameSession.EndRun(score, level, hits, survived);
             comboStreak = 0; comboTier = 0; comboMissLock = 0; comboTimer = 0f;
+            Time.timeScale = 1f;
+
+            // Bank the run's score as lifetime coins for the shop and post it to the local board.
+            Settings.DepositCoins(score);
+            Leaderboard.Submit(score, level, mode == GameMode.Endless ? "ENDLESS" : "CLASSIC");
 
             if (finalScoreText != null)
             {
                 finalScoreText.text =
                     "FINAL SCORE   " + score + "\n" +
-                    "LEVEL REACHED   " + level + "\n\n" +
+                    "LEVEL REACHED   " + level + "\n" +
+                    "COINS EARNED   +" + score + "\n\n" +
                     "HIGH SCORE   " + Settings.HighScore + "\n\n" +
                     "tap anywhere / press ESC to continue";
             }
@@ -522,6 +669,19 @@ namespace SnowCannon
             score += gained;
             hits++;
 
+            // Hit-stop juice: a brief time dip so a connect has weight.
+            hitStopTimer = GameConfig.HitStopTime;
+
+            // Feed the level objective. A head hit scores PointsHead, a scooter scores PointsScooter,
+            // so those values double as the event discriminators here.
+            if (objective != null)
+            {
+                objective.OnHit();
+                if (points == GameConfig.PointsHead) objective.OnHeadshot();
+                else if (points == GameConfig.PointsScooter) objective.OnScooterHit();
+                objective.OnComboTier(comboTier);
+            }
+
             // Float the earned points (and the multiplier tag) up from the target's world position.
             var tr = target as Component;
             if (tr != null && popupRoot != null && cam != null)
@@ -549,6 +709,128 @@ namespace SnowCannon
         public void RegisterMiss()
         {
             if (comboTier > 0) { comboTier--; comboMissLock = 1; }
+        }
+
+        // ---- Tier 2 / Tier 3 systems ------------------------------------------
+
+        /// <summary>Reads the shot-select hotkeys. 1/2/3 arm SPRAY / LANCE / BLIZZARD, 0 returns to
+        /// BASIC. Touch players use the on-screen shot buttons instead (see BuildHud).</summary>
+        void PollShotSelect()
+        {
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            if (kb == null) return;
+            if (kb.digit1Key.wasPressedThisFrame) SelectShot(ShotType.Spray);
+            else if (kb.digit2Key.wasPressedThisFrame) SelectShot(ShotType.IceLance);
+            else if (kb.digit3Key.wasPressedThisFrame) SelectShot(ShotType.Blizzard);
+            else if (kb.digit0Key.wasPressedThisFrame) SelectShot(ShotType.Basic);
+        }
+
+        /// <summary>Spawns the kids / penguins that waddle across the near field on a lazy cadence.
+        /// They are a hazard, not a target: hitting one costs points and water.</summary>
+        void UpdateFriendlies()
+        {
+            for (int i = friendlies.Count - 1; i >= 0; i--)
+            {
+                var f = friendlies[i];
+                if (f == null || f.IsDone)
+                {
+                    if (f != null) Destroy(f.gameObject);
+                    friendlies.RemoveAt(i);
+                }
+            }
+
+            friendlyTimer -= Time.deltaTime;
+            if (friendlyTimer > 0f) return;
+            friendlyTimer = Random.Range(7f, 13f);
+
+            // Only let a couple be on screen at once so the field never gets crowded with no-hits.
+            if (friendlies.Count >= 2) return;
+            bool fromLeft = Random.value < 0.5f;
+            float x = fromLeft ? -(GameConfig.FieldHalfWidth + 2f) : (GameConfig.FieldHalfWidth + 2f);
+            float z = Random.Range(GameConfig.CannonMinZ + 1f, GameConfig.CannonMaxZ + 3f);
+            var fr = Friendly.Spawn(this, cam, new Vector3(x, 0f, z), fromLeft ? 1f : -1f);
+            if (fr != null) friendlies.Add(fr);
+        }
+
+        /// <summary>Spawns the boss on the levels that are a multiple of BossEveryLevels.</summary>
+        void MaybeSpawnBoss()
+        {
+            if (boss != null && !boss.IsDone && !boss.IsDying) return;
+            if (level < GameConfig.BossEveryLevels || level % GameConfig.BossEveryLevels != 0) return;
+            boss = Boss.Spawn(this, cam, level);
+            if (boss != null) boss.transform.SetParent(transform, false);
+        }
+
+        /// <summary>Tracks the live boss: ends the run if it breaches, and clears the reference once
+        /// it has collapsed.</summary>
+        void UpdateBoss()
+        {
+            if (boss == null) return;
+            if (boss.IsDone) { if (boss != null) Destroy(boss.gameObject); boss = null; return; }
+            if (boss.IsDying) return;
+
+            var p = boss.transform.position;
+            bool breach = p.z <= GameConfig.DefeatZ;
+            if (!breach && cannon != null)
+            {
+                var cp = cannon.transform.position;
+                float rr = cannon.FootprintRadius + 1.4f;
+                float cdx = p.x - cp.x, cdz = p.z - cp.z;
+                if (cdx * cdx + cdz * cdz <= rr * rr) breach = true;
+            }
+            if (breach) { if (objective != null) objective.OnBreach(); GameOver(false); }
+        }
+
+        /// <summary>Pauses the run and shows the level-up card. The shared time-scale authority
+        /// (ApplyTimeScale) freezes the game while the overlay is up.</summary>
+        void TriggerLevelUp()
+        {
+            if (levelUpUI != null) return;
+
+            // Build a pool of the upgrades still below their cap, then offer up to three at random.
+            var pool = new List<UpgradeType>();
+            for (int i = 0; i < RunUpgrades.All.Length; i++)
+                if (RunUpgrades.CanOffer(RunUpgrades.All[i])) pool.Add(RunUpgrades.All[i]);
+
+            if (pool.Count == 0) { AdvanceLevel(); return; }   // everything maxed: just roll on
+
+            // Fisher-Yates shuffle then take the first N.
+            for (int i = pool.Count - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                var tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+            }
+            int n = Mathf.Min(GameConfig.LevelUpCardCount, pool.Count);
+            var options = new UpgradeType[n];
+            for (int i = 0; i < n; i++) options[i] = pool[i];
+
+            levelUpUI = LevelUpUI.Show(options, _ => { levelUpUI = null; AdvanceLevel(); });
+        }
+
+        /// <summary>Commits a level advance after a pick (or when nothing was offerable).</summary>
+        void AdvanceLevel()
+        {
+            level++;
+            levelTimer = GameConfig.LevelDuration(level);
+            objective = mode == GameMode.Classic ? Objective.Roll(level) : null;
+            MaybeSpawnBoss();
+        }
+
+        /// <summary>Pays out the current objective's reward if it completed, then clears it.</summary>
+        void CompleteObjective()
+        {
+            if (objective == null) return;
+            if (objective.Complete)
+            {
+                int water, points;
+                objective.Reward(out water, out points);
+                score += points;
+                if (lake != null) lake.GrantMarks(water);
+                if (popupRoot != null)
+                    ScorePopup.Spawn(popupRoot, new Vector2(Screen.width * 0.5f, Screen.height * 0.62f),
+                                     "OBJECTIVE +" + points, new Color(0.6f, 1f, 0.7f, 1f));
+            }
+            objective = null;
         }
 
         // ---- HUD ----------------------------------------------------------------
@@ -586,6 +868,40 @@ namespace SnowCannon
             waterText = AddLine(board, "water", 30, new Vector2(-16f, -188f));
             comboText = AddLine(board, "combo", 30, new Vector2(-16f, -232f));
 
+            // ---- Tier 2 / Tier 3 HUD ------------------------------------------
+            // A danger vignette: a soft red frame that fades in as a snowman nears the line.
+            var vig = Ui.NewRect("vignette", root);
+            Ui.Stretch(vig);
+            dangerVignette = Ui.AddImage(vig, "vig", Ui.Circle, new Color(0.8f, 0.05f, 0.05f, 0f), false);
+            dangerVignette.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            dangerVignette.enabled = false;
+
+            // Objective line, top-left.
+            objectiveText = Ui.AddText(root, "objective", "", 26, new Color(0.7f, 1f, 0.78f, 1f), TextAnchor.MiddleLeft);
+            Ui.Place(objectiveText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                     new Vector2(24f, -30f), new Vector2(520f, 40f));
+
+            // Boss health bar, top-centre, hidden until a boss is live.
+            var bossBar = Ui.NewRect("bossbar", root);
+            Ui.Place(bossBar, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                     new Vector2(0f, -34f), new Vector2(520f, 30f));
+            Ui.AddPanel(bossBar, "bg", new Color(0f, 0f, 0f, 0.4f), false);
+            var bossFillRt = Ui.NewRect("fill", bossBar);
+            bossFillRt.anchorMin = Vector2.zero; bossFillRt.anchorMax = Vector2.one;
+            bossFillRt.offsetMin = Vector2.zero; bossFillRt.offsetMax = Vector2.zero;
+            bossBarImage = bossFillRt.gameObject.AddComponent<Image>();
+            bossBarImage.sprite = Ui.White;
+            bossBarImage.color = new Color(1f, 0.35f, 0.3f, 1f);
+            bossBarImage.type = Image.Type.Filled;
+            bossBarImage.fillMethod = Image.FillMethod.Horizontal;
+            bossBarImage.fillClockwise = true;
+            bossBarImage.raycastTarget = false;
+            bossBarGo = bossBar.gameObject;
+            bossBarGo.SetActive(false);
+
+            // Shot-select buttons along the bottom-centre: BASIC / SPRAY / LANCE / BLIZZARD.
+            BuildShotButtons(root);
+
             // Centre game-over card, hidden until the run ends.
             var over = Ui.NewRect("gameover", root);
             Ui.Stretch(over);
@@ -619,6 +935,46 @@ namespace SnowCannon
             return t;
         }
 
+        /// <summary>Builds the four shot-select buttons along the bottom-centre. Tapping one arms that
+        /// shot (the fire button then fires it). They double as the touch equivalent of the 1/2/3/0
+        /// hotkeys so the premium shots are reachable on a phone.</summary>
+        void BuildShotButtons(RectTransform root)
+        {
+            shotButtons.Clear();
+            var shots = new[] { ShotType.Basic, ShotType.Spray, ShotType.IceLance, ShotType.Blizzard };
+            float bw = 150f, bh = 64f, gap = 14f;
+            float total = shots.Length * bw + (shots.Length - 1) * gap;
+            float startX = -total * 0.5f + bw * 0.5f;
+            for (int i = 0; i < shots.Length; i++)
+            {
+                var s = shots[i];
+                var captured = s;
+                string label = (ShotDefs.Hotkey(s) == 0 ? "" : ShotDefs.Hotkey(s) + " ") + ShotDefs.Label(s);
+                var btn = Ui.AddButton(root, "shot_" + s, label, new Vector2(bw, bh), 22,
+                    new Color(0.1f, 0.24f, 0.4f, 1f), () => SelectShot(captured));
+                Ui.Place(Ui.Rt(btn.gameObject), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                    new Vector2(startX + i * (bw + gap), 52f), new Vector2(bw, bh));
+                shotButtons.Add(btn);
+            }
+            RefreshShotHud();
+        }
+
+        /// <summary>Highlights the armed shot's button and dims the rest so the current selection is
+        /// obvious on both desktop and touch.</summary>
+        void RefreshShotHud()
+        {
+            for (int i = 0; i < shotButtons.Count; i++)
+            {
+                var b = shotButtons[i];
+                if (b == null) continue;
+                var bg = b.targetGraphic;
+                if (bg == null) continue;
+                var c = bg.color;
+                c.a = (i == (int)armedShot) ? 1f : 0.5f;
+                bg.color = c;
+            }
+        }
+
         void RefreshHud()
         {
             if (levelText == null) return;
@@ -644,6 +1000,47 @@ namespace SnowCannon
                                     : new Color(1f, 0.92f, 0.4f, 1f);
                 }
                 else comboText.text = "";
+            }
+
+            // Objective line (Classic only).
+            if (objectiveText != null)
+                objectiveText.text = objective != null ? objective.Text : "";
+
+            // Boss health bar: shown only while a boss is live, filled by its remaining HP fraction.
+            if (bossBarGo != null)
+            {
+                bool live = boss != null && !boss.IsDone && !boss.IsDying;
+                bossBarGo.SetActive(live);
+                if (live && bossBarImage != null)
+                    bossBarImage.fillAmount = Mathf.Clamp01((float)boss.Hp / Mathf.Max(1, boss.MaxHp));
+            }
+
+            // Danger vignette: fade a red frame in as the nearest live snowman (or the boss) closes
+            // on the defeat line, so the player feels the threat before it breaches.
+            if (dangerVignette != null)
+            {
+                float nearest = float.MaxValue;
+                for (int i = 0; i < active.Count; i++)
+                {
+                    var sm = active[i];
+                    if (sm == null || sm.IsDying || sm.IsDone) continue;
+                    float z = sm.transform.position.z;
+                    if (z < nearest) nearest = z;
+                }
+                if (boss != null && !boss.IsDying && !boss.IsDone)
+                    nearest = Mathf.Min(nearest, boss.transform.position.z);
+
+                float danger = 0f;
+                if (nearest != float.MaxValue)
+                {
+                    // Ramps from 0 at mid-field to 1 at the line.
+                    danger = Mathf.InverseLerp(GameConfig.DefeatZ + 16f, GameConfig.DefeatZ + 1f, nearest);
+                }
+                dangerVignette.enabled = danger > 0.02f;
+                if (dangerVignette.enabled)
+                {
+                    var c = dangerVignette.color; c.a = danger * 0.5f; dangerVignette.color = c;
+                }
             }
         }
 

@@ -777,7 +777,8 @@ PlayerSettings:
   webWasm2023: 1
   webEnableSubmoduleStrippingCompatibility: 0
   webProgressiveAssetLoading: 0
-  scriptingDefineSymbols: {}
+  scriptingDefineSymbols:
+    Standalone: UNITY_STANDALONE_LINUX_API
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

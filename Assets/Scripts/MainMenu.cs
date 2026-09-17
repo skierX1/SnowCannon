@@ -442,16 +442,65 @@ namespace SnowCannon
             PlaceTopButton("play", "PLAY", 46, GameConfig.CannonYellow, OnPlay, 0.18f);
             PlaceTopButton("options", "OPTIONS", 38, GameConfig.CannonSteel, OnOptions, 0.5f);
             PlaceTopButton("highscore", "HIGH SCORE", 34, GameConfig.CannonSteel, OnHighScore, 0.82f);
+
+            // A second row: the run-mode toggle and the meta shop. The mode button re-labels itself
+            // with the current mode; tapping it flips Classic <-> Endless and persists the choice.
+            PlaceTopButton("mode", ModeLabel(), 30, new Color(0.16f, 0.4f, 0.55f, 1f), OnToggleMode, 0.3f, -338f);
+            PlaceTopButton("shop", "SHOP", 30, new Color(0.5f, 0.36f, 0.12f, 1f), OnShop, 0.7f, -338f);
+        }
+
+        static string ModeLabel()
+        {
+            return Settings.Mode == GameMode.Endless ? "MODE: ENDLESS" : "MODE: CLASSIC";
+        }
+
+        void OnToggleMode()
+        {
+            Settings.Mode = Settings.Mode == GameMode.Classic ? GameMode.Endless : GameMode.Classic;
+            if (AudioDirector.Instance != null) AudioDirector.Instance.PlayThrow();
+            // Re-label the mode button in place.
+            foreach (Transform t in root)
+            {
+                if (t.name != "mode") continue;
+                var lbl = t.Find("label/Text");
+                if (lbl == null) lbl = FindLabel(t);
+                var txt = lbl != null ? lbl.GetComponent<Text>() : null;
+                if (txt != null) txt.text = ModeLabel();
+                break;
+            }
+        }
+
+        static Transform FindLabel(Transform parent)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                var c = parent.GetChild(i);
+                if (c.name == "label") return c;
+                var deep = FindLabel(c);
+                if (deep != null) return deep;
+            }
+            return null;
+        }
+
+        void OnShop()
+        {
+            if (AudioDirector.Instance != null) AudioDirector.Instance.PlayThrow();
+            MetaShop.Show(() => { });
         }
 
         void PlaceTopButton(string name, string label, int font, Color bg, Action onClick, float fx)
+        {
+            PlaceTopButton(name, label, font, bg, onClick, fx, -230f);
+        }
+
+        void PlaceTopButton(string name, string label, int font, Color bg, Action onClick, float fx, float y)
         {
             var btn = Ui.AddButton(root, name, label, new Vector2(240f, 92f), font, bg, onClick);
             var rt = Ui.Rt(btn.gameObject);
             rt.anchorMin = new Vector2(fx, 1f);
             rt.anchorMax = new Vector2(fx, 1f);
             rt.pivot = new Vector2(0.5f, 1f);
-            rt.anchoredPosition = new Vector2(0f, -230f);
+            rt.anchoredPosition = new Vector2(0f, y);
         }
 
         RectTransform Rt(string name)

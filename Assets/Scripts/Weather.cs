@@ -14,6 +14,12 @@ namespace SnowCannon
             public SpriteRenderer sr;
             public Vector3 velocity;
             public float spin;
+            // Kept internal (NOT public) on purpose: `Flake` is a serialized type, and a NEW public
+            // field here would change the serialised class layout and trip the editor-vs-player
+            // "script class layout is incompatible" build check. Unity only serialises public /
+            // [SerializeField] fields, so internal is layout-stable, yet still readable from the
+            // enclosing Weather class (private would not be).
+            internal float baseAlpha;
         }
 
         Flake[] flakes;
@@ -49,13 +55,15 @@ namespace SnowCannon
                 go.transform.SetParent(transform, false);
                 var sr = go.AddComponent<SpriteRenderer>();
                 sr.sprite = sprite;
-                sr.color = new Color(1f, 1f, 1f, Random.Range(0.18f, 0.42f));
+                float fa = Random.Range(0.18f, 0.42f);
+                sr.color = new Color(1f, 1f, 1f, fa);
                 float s = Random.Range(0.12f, 0.34f);
                 go.transform.localScale = Vector3.one * s;
 
                 flakes[i] = new Flake
                 {
                     sr = sr,
+                    baseAlpha = fa,
                     velocity = new Vector3(Random.Range(-0.35f, 0.35f),
                                            -Random.Range(0.7f, 1.7f),
                                            Random.Range(-0.2f, 0.2f)),
@@ -101,12 +109,28 @@ namespace SnowCannon
         void Update()
         {
             float dt = Time.deltaTime;
+
+            // Weather is now a gameplay layer: the wind the WeatherDirector sets drifts the flakes
+            // sideways, and a blizzard's low visibility thickens the snow and dims the far field so
+            // snowmen emerge later. Both read the shared GameRuntime globals so this stays decoupled.
+            Vector3 wind = GameRuntime.Wind;
+            float vis = Mathf.Clamp01(GameRuntime.Visibility);
+            float blizzard = 1f - vis;   // 0 clear .. 1 full blizzard
+
             for (int i = 0; i < flakes.Length; i++)
             {
                 var f = flakes[i];
                 var t = f.sr.transform;
-                t.position += f.velocity * dt;
+                t.position += (f.velocity + new Vector3(wind.x * 0.35f, 0f, 0f)) * dt;
                 t.Rotate(0f, 0f, f.spin * dt);
+
+                // A blizzard dumps more snow and makes each flake brighter and larger.
+                if (f.sr != null)
+                {
+                    var c = f.sr.color;
+                    c.a = f.baseAlpha * (1f + blizzard * 1.6f);
+                    f.sr.color = c;
+                }
 
                 if (t.position.y < -0.5f || Mathf.Abs(t.position.x) > FieldX + 2f)
                     Respawn(i, false);

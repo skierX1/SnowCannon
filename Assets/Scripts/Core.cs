@@ -16,6 +16,10 @@ namespace SnowCannon
         bool Hit(Vector3 hitPoint, out int points);
     }
 
+    /// <summary>The two run modes. Classic plays timed, escalating levels and ends on a level-up
+    /// pick; Endless is a single ever-harder run scored against the local leaderboard.</summary>
+    public enum GameMode { Classic, Endless }
+
     /// <summary>
     /// Central tuning values for the whole game. World convention: the camera sits at
     /// negative Z and looks toward positive Z, so snowmen spawn far away (large Z) and
@@ -100,6 +104,41 @@ namespace SnowCannon
         public const float BannerAuraRadius = 6.5f;
         public const float BannerSpeedBoost = 0.6f;
         public const float BomberJamTime = 1.1f;
+
+        // ---- Boss (appears every BossEveryLevels levels) --------------------------
+        // A big multi-phase snowman: it summons minions, lobs jamming volleys, and must be hit on
+        // its glowing head weak-point for bonus damage. Body hits still count but do less.
+        public const int BossEveryLevels = 5;
+        public const int BossBaseHp = 16;
+        public const float BossHpPerLevel = 2f;
+        public const float BossScale = 3.4f;
+        public const float BossSpeed = 1.05f;
+        public const int BossPoints = 40;
+        public const int BossBodyDamage = 1;
+        public const int BossHeadDamage = 3;
+        public const float BossHeadHeight = 0.82f;      // fraction of height where the head sits
+        public const float BossHeadRadius = 0.9f;       // weak-point catch radius (world units)
+        public const float BossSummonInterval = 4.5f;
+        public const float BossVolleyInterval = 6.5f;
+
+        // ---- Premium shots --------------------------------------------------------
+        // Per-shot water costs / counts / spread / pierce live on ShotDefs. These are the shared
+        // tuning the blizzard's field-chill uses on impact.
+        public const float BlizzardChillTime = 3.5f;
+        public const float BlizzardChillAmount = 0.4f;
+
+        // ---- Level-up cards -------------------------------------------------------
+        public const int LevelUpCardCount = 3;
+
+        // ---- Friendly fire --------------------------------------------------------
+        // Hitting a kid or penguin costs points and spills water, so wild spraying is punished.
+        public const int FriendlyPenaltyPoints = 5;
+        public const int FriendlyPenaltyWater = 4;
+
+        // ---- Juice ----------------------------------------------------------------
+        // A brief global time-scale dip on a kill, plus a camera punch, for impact feel.
+        public const float HitStopTime = 0.05f;
+        public const float HitStopScale = 0.1f;
 
         // ---- Level progression -------------------------------------------------
         public const int FirstLevelDuration = 60;
@@ -296,6 +335,75 @@ namespace SnowCannon
         {
             PlayerPrefs.DeleteKey(KeyHighScore);
             PlayerPrefs.Save();
+        }
+
+        // ---- Meta progression (lifetime-score bank + permanent unlocks) ----------
+        const string KeyCoins = "sc_coins";
+        const string KeyPermCombo = "sc_perm_combo";
+        const string KeyPermWater = "sc_perm_water";
+        const string KeyMode = "sc_mode";
+
+        /// <summary>The spendable bank. Every run deposits its final score here; the shop spends it
+        /// on permanent unlocks that fold into the next run's start.</summary>
+        public static int Coins
+        {
+            get { return PlayerPrefs.GetInt(KeyCoins, 0); }
+            set { PlayerPrefs.SetInt(KeyCoins, Mathf.Max(0, value)); PlayerPrefs.Save(); }
+        }
+
+        public static void DepositCoins(int amount)
+        {
+            if (amount <= 0) return;
+            Coins = Coins + amount;
+        }
+
+        public const int MaxPermCombo = 3;
+        public const int MaxPermWater = 3;
+
+        public static int PermComboBoost
+        {
+            get { return Mathf.Clamp(PlayerPrefs.GetInt(KeyPermCombo, 0), 0, MaxPermCombo); }
+        }
+
+        public static int PermExtraWater
+        {
+            get { return Mathf.Clamp(PlayerPrefs.GetInt(KeyPermWater, 0), 0, MaxPermWater); }
+        }
+
+        /// <summary>The escalating price of the next level of a permanent track.</summary>
+        public static int PermCost(int currentLevel) { return 60 + currentLevel * 90; }
+
+        /// <summary>Buys one level of the combo-starter track if the bank covers it.</summary>
+        public static bool BuyPermCombo()
+        {
+            int lvl = PermComboBoost;
+            if (lvl >= MaxPermCombo) return false;
+            int cost = PermCost(lvl);
+            if (Coins < cost) return false;
+            Coins = Coins - cost;
+            PlayerPrefs.SetInt(KeyPermCombo, lvl + 1);
+            PlayerPrefs.Save();
+            return true;
+        }
+
+        /// <summary>Buys one level of the reserve-water track if the bank covers it.</summary>
+        public static bool BuyPermWater()
+        {
+            int lvl = PermExtraWater;
+            if (lvl >= MaxPermWater) return false;
+            int cost = PermCost(lvl);
+            if (Coins < cost) return false;
+            Coins = Coins - cost;
+            PlayerPrefs.SetInt(KeyPermWater, lvl + 1);
+            PlayerPrefs.Save();
+            return true;
+        }
+
+        /// <summary>The selected run mode (Classic timed levels, or Endless).</summary>
+        public static GameMode Mode
+        {
+            get { return (GameMode)Mathf.Clamp(PlayerPrefs.GetInt(KeyMode, 0), 0, 1); }
+            set { PlayerPrefs.SetInt(KeyMode, (int)value); PlayerPrefs.Save(); }
         }
 
         public static void Save() { PlayerPrefs.Save(); }

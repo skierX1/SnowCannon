@@ -535,7 +535,11 @@ namespace SnowCannon
             // left or right, so the path is a random diagonal that uses the whole field width.
             float rad = headingDeg * (Mathf.PI / 180f);
             Vector3 dir = new Vector3(Mathf.Sin(rad), 0f, -Mathf.Cos(rad));
-            p += dir * (Speed * (1f + speedBoost) * Time.deltaTime);
+            // The march is scaled by the shared weather/upgrade globals: a blizzard (or the CHILL
+            // FIELD upgrade) slows the whole field, an ice patch slickens it so they slide faster.
+            float fieldMod = (1f - Mathf.Clamp01(GameRuntime.FieldSlow)) *
+                             (1f + Mathf.Clamp01(GameRuntime.IceFactor) * 0.5f);
+            p += dir * (Speed * (1f + speedBoost) * fieldMod * Time.deltaTime);
 
             // Bounce off the visible screen edges so a snowman always stays on screen. The limit
             // is the field width that is actually visible at THIS depth (the camera is a pinhole,

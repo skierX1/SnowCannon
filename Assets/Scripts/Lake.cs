@@ -448,6 +448,24 @@ namespace SnowCannon
             Marks = Mathf.Min(Max, Marks + SpawnGain);
         }
 
+        /// <summary>Adds a one-off top-up of marks (clamped to the lake's capacity). Used at run start
+        /// to fold in the RESERVE WATER upgrade / meta head-start.</summary>
+        public void GrantMarks(int amount)
+        {
+            if (amount <= 0) return;
+            Marks = Mathf.Min(Max, Marks + amount);
+        }
+
+        /// <summary>Spends a specific number of marks (premium shots cost more than one). Returns false
+        /// and flashes when the lake cannot cover the cost.</summary>
+        public bool OnFireAttemptMarks(int cost)
+        {
+            cost = Mathf.Max(1, cost);
+            if (Marks < cost) { TriggerDryFlash(); return false; }
+            Marks = Mathf.Max(0, Marks - cost);
+            return true;
+        }
+
         /// <summary>Spends one mark if there is water; returns false (and flashes) when dry.</summary>
         public bool OnFireAttempt()
         {
