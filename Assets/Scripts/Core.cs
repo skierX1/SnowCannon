@@ -23,7 +23,7 @@ namespace SnowCannon
     /// <summary>The aiming aid shown while the barrel tracks. Exactly one is active at a time:
     /// the flat ground landing reticle (a point on the snow), or the shimmering trajectory ribbon
     /// tracing the last third of the shot's arc. Chosen from the options menu.</summary>
-    public enum AimGuide { GroundReticle, Trajectory }
+    public enum AimGuide { GroundReticle, Trajectory, Off }
 
     /// <summary>
     /// Central tuning values for the whole game. World convention: the camera sits at
@@ -44,7 +44,7 @@ namespace SnowCannon
         // ---- Cannon ------------------------------------------------------------
         public const float CannonSpeed = 8.5f;
         public const float FireCooldown = 0.32f;
-        public const float SnowballSpeed = 68f;
+        public const float SnowballSpeed = 76f;
         public const float SnowballRadius = 0.95f;
         public const float SnowballLifeTime = 3.0f;
         public const float SnowballGravity = 40f;
@@ -165,7 +165,7 @@ namespace SnowCannon
         public static float SpawnInterval(int level)
         {
             if (level <= 1)
-                return Mathf.Max(MinSpawnInterval, FirstSpawnInterval * 2f);
+                return Mathf.Max(MinSpawnInterval, FirstSpawnInterval * 4f);
             float v = FirstSpawnInterval * Mathf.Pow(SpawnIntervalFactor, Mathf.Max(0, level - 1));
             return Mathf.Max(MinSpawnInterval, v);
         }
@@ -302,7 +302,9 @@ namespace SnowCannon
             get
             {
                 int v = PlayerPrefs.GetInt(KeyAimGuide, (int)AimGuide.GroundReticle);
-                return v == (int)AimGuide.Trajectory ? AimGuide.Trajectory : AimGuide.GroundReticle;
+                if (v == (int)AimGuide.Trajectory) return AimGuide.Trajectory;
+                if (v == (int)AimGuide.Off) return AimGuide.Off;
+                return AimGuide.GroundReticle;
             }
             set { PlayerPrefs.SetInt(KeyAimGuide, (int)value); }
         }

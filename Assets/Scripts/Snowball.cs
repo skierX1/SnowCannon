@@ -47,7 +47,9 @@ namespace SnowCannon
         public static readonly float MaxHeight = LaunchSpeed * LaunchSpeed / (2f * Gravity) + 6f;
 
         // Horizontal despawn bound, likewise generous versus the logical field width (see Update).
-        const float DespawnHalfWidth = 40f;
+        // Widened so a spray ball led out toward a far-edge skier (who crosses the full VISIBLE width
+        // at the deep lane) is not culled on x before it can arrive.
+        const float DespawnHalfWidth = 48f;
 
         public static Snowball Fire(Vector3 origin, Vector3 direction, SnowCannonGame owner,
                                     int pierce = 1, bool chills = false, Color tint = default)
@@ -140,7 +142,7 @@ namespace SnowCannon
             // allows a little below ground so a low arc can still clip a snowman's base, and the
             // ceiling is derived from the launch physics so a high arc is never culled at its apex.
             var p = transform.position;
-            if (p.z > GameConfig.FieldMaxZ + 6f || p.z < GameConfig.FieldMinZ - 6f ||
+            if (p.z > GameConfig.FieldMaxZ + 14f || p.z < GameConfig.FieldMinZ - 6f ||
                 Mathf.Abs(p.x) > DespawnHalfWidth || p.y > MaxHeight || p.y < -0.6f)
             {
                 Despawn();

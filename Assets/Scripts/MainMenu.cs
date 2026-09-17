@@ -769,7 +769,16 @@ namespace SnowCannon
         }
         void OnToggleMusic() { Settings.Music = !Settings.Music; if (AudioDirector.Instance != null) AudioDirector.Instance.ApplySettings(); RefreshOptionLabels(); }
         void OnToggleVibration() { Settings.Vibration = !Settings.Vibration; RefreshOptionLabels(); }
-        void OnCycleAimGuide() { Settings.AimGuideMode = Settings.AimGuideMode == AimGuide.GroundReticle ? AimGuide.Trajectory : AimGuide.GroundReticle; RefreshOptionLabels(); }
+        void OnCycleAimGuide()
+        {
+            // Cycle RETICLE -> TRAJECTORY -> OFF -> RETICLE so the player can also hide the aid entirely.
+            var m = Settings.AimGuideMode;
+            if (m == AimGuide.GroundReticle) m = AimGuide.Trajectory;
+            else if (m == AimGuide.Trajectory) m = AimGuide.Off;
+            else m = AimGuide.GroundReticle;
+            Settings.AimGuideMode = m;
+            RefreshOptionLabels();
+        }
         void OnCycleQuality() { Settings.Quality = (Settings.Quality + 1) % Settings.QualityLevelCount; RefreshOptionLabels(); }
         void OnResetHighScore() { Settings.ResetHighScore(); if (highScoreValue != null) highScoreValue.text = "0"; }
 
@@ -778,7 +787,11 @@ namespace SnowCannon
             if (soundLabel != null) soundLabel.text = Settings.Sound ? "ON" : "OFF";
             if (musicLabel != null) musicLabel.text = Settings.Music ? "ON" : "OFF";
             if (vibrationLabel != null) vibrationLabel.text = Settings.Vibration ? "ON" : "OFF";
-            if (aimGuideLabel != null) aimGuideLabel.text = Settings.AimGuideMode == AimGuide.Trajectory ? "TRAJECTORY" : "RETICLE";
+            if (aimGuideLabel != null)
+            {
+                var m = Settings.AimGuideMode;
+                aimGuideLabel.text = m == AimGuide.Trajectory ? "TRAJECTORY" : (m == AimGuide.Off ? "OFF" : "RETICLE");
+            }
             if (qualityLabel != null)
             {
                 string[] names = { "LOW", "MEDIUM", "HIGH" };
