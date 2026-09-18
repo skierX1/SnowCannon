@@ -9,7 +9,7 @@ namespace SnowCannon
 {
     /// <summary>
     /// The title screen. A procedurally drawn backdrop of snowmen marching toward a yellow
-    /// cannon sits behind three buttons along the top: Play, Options and High Score. The two
+    /// cannon sits behind three buttons along the top: Options, Play and High Score. The two
     /// secondary buttons open overlay panels; Play loads the game scene.
     /// </summary>
     public sealed class MainMenu : MonoBehaviour
@@ -26,6 +26,7 @@ namespace SnowCannon
         Text qualityLabel;
         Text vibrationLabel;
         Text highScoreValue;
+        Text maxLevelValue;
         Text volumeValue;
         Slider volumeSlider;
         bool refreshingVolume;
@@ -35,8 +36,9 @@ namespace SnowCannon
         Text titleText;
         float titlePhase;
 
-        // Keyboard navigation for desktop players: the arrow keys (or WASD) move a focus ring
-        // across the currently visible panel's buttons; Enter / Space presses the focused one.
+        // Keyboard navigation for desktop players: the arrow keys (or WASD, or TAB / SHIFT+TAB)
+        // move a focus ring across the currently visible panel's buttons; Enter / Space presses
+        // the focused one.
         readonly List<Button> navButtons = new List<Button>();
         int navIndex = -1;
         GameObject navPanel;
@@ -222,7 +224,7 @@ namespace SnowCannon
             {
                 navPanel = panel;
                 RebuildNav(panel);
-                navIndex = navButtons.Count > 0 ? 0 : -1;
+                navIndex = DefaultNavIndex();
                 ApplyFocus();
             }
             if (navButtons.Count == 0) return;
@@ -237,6 +239,10 @@ namespace SnowCannon
             { navIndex = (navIndex + 1) % n; moved = true; }
             else if (kb.leftArrowKey.wasPressedThisFrame || kb.aKey.wasPressedThisFrame)
             { navIndex = (navIndex - 1 + n) % n; moved = true; }
+            // TAB walks the buttons forward and SHIFT+TAB walks them back, so a desktop player can
+            // cycle the whole row without ever reaching for the arrow keys.
+            else if (kb.tabKey.wasPressedThisFrame)
+            { navIndex = kb.shiftKey.isPressed ? (navIndex - 1 + n) % n : (navIndex + 1) % n; moved = true; }
 
             if (moved) { ApplyFocus(); return; }
 
@@ -245,6 +251,16 @@ namespace SnowCannon
             {
                 if (navFocused != null && navFocused.interactable) navFocused.onClick.Invoke();
             }
+        }
+
+        /// <summary>The button the focus ring lands on when a panel first appears: PLAY on the title
+        /// screen (so ENTER starts a run straight away at launch), otherwise the first button.</summary>
+        int DefaultNavIndex()
+        {
+            if (navButtons.Count == 0) return -1;
+            for (int i = 0; i < navButtons.Count; i++)
+                if (navButtons[i] != null && navButtons[i].gameObject.name == "play") return i;
+            return 0;
         }
 
         void RebuildNav(GameObject panel)
@@ -450,6 +466,9 @@ namespace SnowCannon
             // outline for a chiselled edge, and a soft offset blue shadow for a bevelled, frozen depth.
             titleText = Ui.AddText(root, "title", "SNOW  CANNON", 92,
                                   new Color(0.90f, 0.96f, 1.00f, 1f), TextAnchor.MiddleCenter);
+            // A heavier, more characterful face than the default Arial for the masthead; falls back to
+            // the shared font if none of these faces is installed on the host OS.
+            titleText.font = Ui.MakeFont(new[] { "Segoe UI Semibold", "Segoe UI Bold", "Corbel", "Trebuchet MS", "Verdana" }, 92);
             Ui.Place(Ui.Rt(titleText.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
                      new Vector2(0f, -70f), new Vector2(900f, 130f));
 
@@ -462,9 +481,12 @@ namespace SnowCannon
             shadow.effectDistance = new Vector2(0f, -3f);
 
             var sub = Ui.AddText(root, "sub", "blast the snowmen before they reach you", 30,
-                                new Color(0.1f, 0.2f, 0.3f, 1f), TextAnchor.MiddleCenter);
+                                new Color(0.05f, 0.15f, 0.45f, 1f), TextAnchor.MiddleCenter);
+            // A clean humanist face for the tagline, paired with the masthead above.
+            sub.font = Ui.MakeFont(new[] { "Segoe UI", "Corbel", "Candara", "Trebuchet MS", "Tahoma" }, 30);
+            // Nudge the tagline clear of the big title's descenders so the two no longer collide.
             Ui.Place(Ui.Rt(sub.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                     new Vector2(0f, -150f), new Vector2(900f, 50f));
+                     new Vector2(0f, -190f), new Vector2(900f, 50f));
         }
 
         void BuildButtons()
@@ -473,19 +495,55 @@ namespace SnowCannon
             // FRACTIONAL x positions across the root (not fixed pixel offsets) so they always fit
             // the screen width, even on an extreme-aspect phone like a Galaxy Fold in portrait,
             // where fixed +/-300 px offsets would push the outer buttons off the edge.
-            PlaceTopButton("play", "PLAY", 46, GameConfig.CannonYellow, OnPlay, 0.18f);
-            PlaceTopButton("options", "OPTIONS", 38, GameConfig.CannonSteel, OnOptions, 0.5f);
-            PlaceTopButton("highscore", "HIGH SCORE", 34, GameConfig.CannonSteel, OnHighScore, 0.82f);
+            // OPTIONS holds the left slot and PLAY takes the centre (the primary action reads best
+            // in the middle); HIGH SCORE stays on the right. Each keeps its own size. The fills use a
+            // saturated, high-chroma palette so the title screen reads as colourful rather than the
+            // old muted steel/brown; AddButton drops the alpha for a glass look but the hue stays vivid.
+            PlaceTopButton("options", "OPTIONS", 38, new Color(0.13f, 0.45f, 0.95f, 1f), OnOptions, 0.18f);
+            PlaceTopButton("play", "PLAY", 46, new Color(0.10f, 0.74f, 0.30f, 1f), OnPlay, 0.5f);
+            PlaceTopButton("highscore", "HIGH SCORE", 34, new Color(0.60f, 0.22f, 0.82f, 1f), OnHighScore, 0.82f);
 
             // A second row: the run-mode toggle and the meta shop. The mode button re-labels itself
             // with the current mode; tapping it flips Classic <-> Endless and persists the choice.
-            PlaceTopButton("mode", ModeLabel(), 30, new Color(0.16f, 0.4f, 0.55f, 1f), OnToggleMode, 0.3f, -338f);
-            PlaceTopButton("shop", "SHOP", 30, new Color(0.5f, 0.36f, 0.12f, 1f), OnShop, 0.7f, -338f);
+            // A second row: the run-mode toggle, the start-level picker and the meta shop. The mode
+            // button re-labels itself with the current mode; tapping it flips Classic <-> Endless and
+            // persists the choice. The LEVEL button cycles the level the next run starts on (1..max
+            // ever reached), so a seasoned player can skip the easy opening levels.
+            PlaceTopButton("mode", ModeLabel(), 30, new Color(0.05f, 0.60f, 0.72f, 1f), OnToggleMode, 0.3f, -360f);
+            PlaceTopButton("level", StartLevelLabel(), 30, new Color(0.86f, 0.62f, 0.10f, 1f), OnCycleStartLevel, 0.5f, -360f);
+            PlaceTopButton("shop", "SHOP", 30, new Color(0.95f, 0.45f, 0.06f, 1f), OnShop, 0.7f, -360f);
         }
 
         static string ModeLabel()
         {
             return Settings.Mode == GameMode.Endless ? "MODE: ENDLESS" : "MODE: CLASSIC";
+        }
+
+        /// <summary>The label on the start-level picker: the level the next run will begin on.</summary>
+        string StartLevelLabel()
+        {
+            return "LEVEL: " + Settings.StartLevel;
+        }
+
+        /// <summary>Cycle the start-level picker forward through 1..MaxLevelReached (wrapping to 1),
+        /// re-labelling the button in place. A player who has only ever reached level 1 sees a fixed
+        /// "LEVEL: 1". The stored value is clamped to the highest level actually reached.</summary>
+        void OnCycleStartLevel()
+        {
+            int max = Mathf.Max(1, Settings.MaxLevelReached);
+            int next = Settings.StartLevel + 1;
+            if (next > max) next = 1;
+            Settings.StartLevel = next;
+            if (AudioDirector.Instance != null) AudioDirector.Instance.PlayThrow();
+            foreach (Transform t in root)
+            {
+                if (t.name != "level") continue;
+                var lbl = t.Find("label/Text");
+                if (lbl == null) lbl = FindLabel(t);
+                var txt = lbl != null ? lbl.GetComponent<Text>() : null;
+                if (txt != null) txt.text = StartLevelLabel();
+                break;
+            }
         }
 
         void OnToggleMode()
@@ -524,7 +582,7 @@ namespace SnowCannon
 
         void PlaceTopButton(string name, string label, int font, Color bg, Action onClick, float fx)
         {
-            PlaceTopButton(name, label, font, bg, onClick, fx, -230f);
+            PlaceTopButton(name, label, font, bg, onClick, fx, -250f);
         }
 
         void PlaceTopButton(string name, string label, int font, Color bg, Action onClick, float fx, float y)
@@ -677,6 +735,13 @@ namespace SnowCannon
             Ui.Place(Ui.Rt(highScoreValue.gameObject), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
                      new Vector2(0f, 80f), new Vector2(500f, 120f));
 
+            // The lifetime best level, shown under the score so the player can see how far they have
+            // ever gotten (and how high the start-level picker will let them jump).
+            maxLevelValue = Ui.AddText(card, "maxlevel", "MAX LEVEL  1", 34,
+                                      new Color(0.7f, 0.9f, 1f, 1f), TextAnchor.MiddleCenter);
+            Ui.Place(Ui.Rt(maxLevelValue.gameObject), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                     new Vector2(0f, -30f), new Vector2(500f, 60f));
+
             Ui.AddButton(card, "reset", "RESET HIGH SCORE", new Vector2(420f, 70f), 30,
                         new Color(0.8f, 0.25f, 0.2f, 1f), OnResetHighScore);
             Ui.Place(RtChild(card, "reset"), new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
@@ -709,6 +774,7 @@ namespace SnowCannon
         void OnHighScore()
         {
             if (highScoreValue != null) highScoreValue.text = Settings.HighScore.ToString();
+            if (maxLevelValue != null) maxLevelValue.text = "MAX LEVEL  " + Mathf.Max(1, Settings.MaxLevelReached);
             highScorePanel.SetActive(true);
             optionsPanel.SetActive(false);
         }
@@ -780,7 +846,23 @@ namespace SnowCannon
             RefreshOptionLabels();
         }
         void OnCycleQuality() { Settings.Quality = (Settings.Quality + 1) % Settings.QualityLevelCount; RefreshOptionLabels(); }
-        void OnResetHighScore() { Settings.ResetHighScore(); if (highScoreValue != null) highScoreValue.text = "0"; }
+        void OnResetHighScore()
+        {
+            Settings.ResetHighScore();
+            if (highScoreValue != null) highScoreValue.text = "0";
+            if (maxLevelValue != null) maxLevelValue.text = "MAX LEVEL  1";
+            // Resetting the high score also wipes the max level, so the start-level picker drops back
+            // to level 1 -- re-label it in place to match.
+            foreach (Transform t in root)
+            {
+                if (t.name != "level") continue;
+                var lbl = t.Find("label/Text");
+                if (lbl == null) lbl = FindLabel(t);
+                var txt = lbl != null ? lbl.GetComponent<Text>() : null;
+                if (txt != null) txt.text = StartLevelLabel();
+                break;
+            }
+        }
 
         void RefreshOptionLabels()
         {

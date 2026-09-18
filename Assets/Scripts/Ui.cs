@@ -73,6 +73,20 @@ namespace SnowCannon
             return null;
         }
 
+        /// <summary>Loads a specific named OS face (first installed name in the list wins), for callers
+        /// that want a distinct look from the default body font. Falls back to the shared <see cref="Font"/>
+        /// if none of the requested faces is present, so a missing font can never blank the text.</summary>
+        public static Font MakeFont(string[] names, int baseSize)
+        {
+            try
+            {
+                var f = Font.CreateDynamicFontFromOSFont(names, baseSize);
+                if (f != null) return f;
+            }
+            catch { }
+            return Font;
+        }
+
         public static Canvas CreateCanvas(string name, int sort)
         {
             var go = new GameObject(name);

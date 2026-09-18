@@ -55,6 +55,19 @@ namespace SnowCannon
         /// without the game having to hand the whole list to each Update.</summary>
         static readonly List<Snowman> all = new List<Snowman>();
 
+        /// <summary>Destroys every registered snowman. Used by the director to start a fresh
+        /// classic level on an empty plane. Safe to call at any time; OnDestroy unregisters each
+        /// one as it is torn down, so the list drains itself.</summary>
+        public static void ClearAll()
+        {
+            for (int i = all.Count - 1; i >= 0; i--)
+            {
+                var sm = all[i];
+                if (sm != null) Destroy(sm.gameObject);
+            }
+            all.Clear();
+        }
+
         Transform bottomBall;
         readonly List<Chunk> chunks = new List<Chunk>();
         float fadeTimer;
@@ -69,13 +82,24 @@ namespace SnowCannon
         float spawnInTimer;
         bool spawningIn = true;
 
+        // How the snowman makes its entrance. 0 = the classic pop-up-from-the-snow (rise from under
+        // the surface + elastic grow). 1 = drop in from above and land with a squash. 2 = spin up
+        // out of the drift. 3 = grow upward from a flat pancake on the snow. Chosen per snowman so
+        // the field varies HOW each one appears, not just that it appears.
+        int spawnStyle;
+        float spinStartYaw;
+
         // The hinged lower jaw that opens and closes at random while the snowman marches.
         Transform jaw;
         float jawPhase, jawTimer, jawOpen;
-        // 0 = pot, 1 = icicles, 2 = punk mohawk, 3 = shaggy snow afro. Chosen per snowman.
+        // 0 = bucket, 1 = icicles (tip up), 2 = punk mohawk, 3 = shaggy snow afro, 4 = flower pot.
         int hairStyle;
         // 0 = outward burst, 1 = confetti pop, 2 = collapse down, 3 = tornado spin.
         int deathStyle;
+
+        // Whether this snowman rolls on a pair of skis. Chosen per snowman so some wear them and
+        // some do not, for a bit of extra variety in the marching field.
+        bool hasSki;
 
         // Travel heading, in degrees off straight-ahead (0 = straight at the camera, + = to the
         // right). Chosen at random up to MaxAngle and reflected off the side walls and off other
@@ -108,6 +132,9 @@ namespace SnowCannon
             sm.maxAngle = Mathf.Clamp(maxAngleDeg, 0f, 30f);
             sm.headingDeg = Random.Range(-sm.maxAngle, sm.maxAngle);
             sm.deathStyle = Random.Range(0, 4);
+            sm.spawnStyle = Random.Range(0, 4);
+            sm.spinStartYaw = Random.Range(0f, 360f);
+            sm.hasSki = Random.value < 0.42f;
 
             // Per-archetype tuning off the caller's base size/speed: the tough kinds are bigger,
             // slower and need more hits; Runners are the quick, fragile baseline.
@@ -191,6 +218,9 @@ namespace SnowCannon
             // Archetype-specific silhouette so each kind is readable at a glance.
             BuildKindExtras();
 
+            // Some snowmen roll on a pair of skis (chosen per snowman in Spawn).
+            if (hasSki) BuildSki();
+
             // One capsule over the whole stack so a snowball's sphere-cast can actually connect.
             // The individual balls are decorative and have their colliders removed.
             float top = Yt + Rt;
@@ -207,6 +237,28 @@ namespace SnowCannon
             // Start collapsed to (almost) nothing so the first Update's spawn-in animation grows
             // it up out of the snow instead of showing a full-size snowman for one frame.
             transform.localScale = Vector3.one * (size * 0.001f);
+        }
+
+        /// <summary>A pair of bright planks under the feet for the ski-wearing snowmen. Built from
+        /// scaled cubes (there is no plank primitive), tracked as chunks so they fly off on death.</summary>
+        void BuildSki()
+        {
+            var skiMat = Mat.Opaque(GameConfig.PotColors[Random.Range(0, GameConfig.PotColors.Length)]);
+            Register(skiMat);
+            float len = Rb * 3.6f;
+            for (int s = 0; s < 2; s++)
+            {
+                float sx = (s == 0 ? -1f : 1f) * Rb * 0.52f;
+                var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = "ski" + s;
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = new Vector3(sx, 0.05f, 0f);
+                go.transform.localScale = new Vector3(Rb * 0.3f, 0.05f, len);
+                go.transform.localEulerAngles = Vector3.zero;
+                go.GetComponent<MeshRenderer>().material = skiMat;
+                Destroy(go.GetComponent<Collider>());
+                Track(go, skiMat);
+            }
         }
 
         void BuildMouth(Material coal)
@@ -251,11 +303,11 @@ namespace SnowCannon
 
         void BuildHair(Material pot)
         {
-            hairStyle = Random.Range(0, 4);
+            hairStyle = Random.Range(0, 5);
             float crown = Yt + Rt * 0.86f;
             switch (hairStyle)
             {
-                case 1: // icicles hanging off the crown
+                case 1: // icicles standing up off the crown
                 {
                     var ice = Mat.Opaque(new Color(0.72f, 0.88f, 1f, 0.9f));
                     Register(ice);
@@ -265,9 +317,35 @@ namespace SnowCannon
                         float a = (i / (float)n) * Mathf.PI * 2f;
                         float rr = Rt * Random.Range(0.5f, 0.85f);
                         float len = Rt * Random.Range(0.5f, 1.1f);
+                        // The sharp tip must ALWAYS point up (never hang down), so the cone is left
+                        // unrotated: TruncatedCone puts its wide base at y=0 and its tip at y=height.
                         AddMeshPart("icicle" + i, MeshFactory.TruncatedCone(Rt * 0.12f, 0f, len, 7), ice,
                                     new Vector3(Mathf.Cos(a) * rr, crown, Mathf.Sin(a) * rr), Vector3.one,
-                                    new Vector3(180f, 0f, 0f));
+                                    Vector3.zero);
+                    }
+                    break;
+                }
+                case 4: // a terracotta flower pot worn as a cap, with a little sprout on top
+                {
+                    var clay = Mat.Opaque(new Color(0.72f, 0.36f, 0.24f, 1f));
+                    Register(clay);
+                    // The pot silhouette: narrow at the base, flaring to a wide mouth at the top.
+                    AddMeshPart("flowerpot", MeshFactory.TruncatedCone(Rt * 0.5f, Rt * 0.82f, Rt * 0.72f, 14), clay,
+                                new Vector3(0, crown, 0), Vector3.one, Vector3.zero);
+                    // A rim around the mouth so it reads as a pot, not a plain cone.
+                    AddMeshPart("flowerpot_rim", MeshFactory.TruncatedCone(Rt * 0.86f, Rt * 0.8f, Rt * 0.14f, 14), clay,
+                                new Vector3(0, crown + Rt * 0.72f, 0), Vector3.one, Vector3.zero);
+                    // A small green sprout poking out of the mouth.
+                    var leaf = Mat.Opaque(new Color(0.28f, 0.66f, 0.3f, 1f));
+                    Register(leaf);
+                    int n = Random.Range(3, 6);
+                    for (int i = 0; i < n; i++)
+                    {
+                        float a = (i / (float)n) * Mathf.PI * 2f + Random.Range(-0.3f, 0.3f);
+                        float lean = Random.Range(18f, 40f);
+                        AddMeshPart("sprout" + i, MeshFactory.TruncatedCone(Rt * 0.06f, 0f, Rt * Random.Range(0.5f, 0.9f), 6), leaf,
+                                    new Vector3(Mathf.Cos(a) * Rt * 0.28f, crown + Rt * 0.8f, Mathf.Sin(a) * Rt * 0.28f),
+                                    Vector3.one, new Vector3(Mathf.Sin(a) * lean, 0f, -Mathf.Cos(a) * lean));
                     }
                     break;
                 }
@@ -619,12 +697,46 @@ namespace SnowCannon
                 const float c3 = c1 + 1f;
                 float q = k - 1f;
                 float e = 1f + c3 * q * q * q + c1 * q * q;
-                float s = size * Mathf.Max(0.001f, e);
-                transform.localScale = Vector3.one * s;
+                float grow = Mathf.Max(0.001f, e);
                 var sp = transform.position;
-                sp.y = Mathf.Lerp(-Rb * size * 1.6f, 0f, k);
+                Vector3 sc = Vector3.one * (size * grow);
+                float y = 0f;
+                bool setRot = false;
+                float spinYaw = 0f;
+
+                switch (spawnStyle)
+                {
+                    case 1:
+                        // Drop in from above and land with a squash-and-settle.
+                        y = Mathf.Lerp(3.0f * size, 0f, Mathf.SmoothStep(0f, 1f, k));
+                        float sy = 1f - 0.22f * Mathf.Sin(Mathf.PI * Mathf.Clamp01((k - 0.7f) / 0.3f));
+                        sc = new Vector3(size, size * sy, size);
+                        break;
+                    case 2:
+                        // Spin up out of the drift while it grows.
+                        y = Mathf.Lerp(-Rb * size * 0.6f, 0f, k);
+                        sc = Vector3.one * (size * grow);
+                        setRot = true;
+                        spinYaw = Mathf.Lerp(spinStartYaw, 0f, k);
+                        break;
+                    case 3:
+                        // Grow upward from a flat pancake resting on the snow.
+                        y = 0f;
+                        sc = new Vector3(size, size * grow, size);
+                        break;
+                    default:
+                        // Classic pop-up: rise from just under the surface while elastically growing.
+                        y = Mathf.Lerp(-Rb * size * 1.6f, 0f, k);
+                        sc = Vector3.one * (size * grow);
+                        break;
+                }
+
+                transform.localScale = sc;
+                sp.y = y;
                 transform.position = sp;
-                HeadWorldY = sp.y + Yt * s;
+                if (setRot) transform.rotation = Quaternion.Euler(0f, spinYaw, 0f);
+                HeadWorldY = sp.y + Yt * sc.y;
+
                 if (k >= 1f)
                 {
                     spawningIn = false;
@@ -792,6 +904,11 @@ namespace SnowCannon
                 var col = c.material.color;
                 col.a = c.baseAlpha * alpha;
                 c.material.color = col;
+                // URP Lit/Unlit read _BaseColor, NOT the legacy _Color that .color maps to, so the
+                // alpha fade must be pushed into _BaseColor too or the debris stays fully opaque.
+                var bc = c.material.GetColor("_BaseColor");
+                bc.a = c.baseAlpha * alpha;
+                c.material.SetColor("_BaseColor", bc);
 
                 if (!c.detached) continue;
 
@@ -810,7 +927,15 @@ namespace SnowCannon
                 }
             }
 
-            if (k >= 1f) IsDone = true;
+            if (k >= 1f)
+            {
+                // The chunks were detached from the root (SetParent(null)) so destroying the root
+                // would NOT reach them -- they would linger as opaque debris at the kill point.
+                // Destroy them explicitly here.
+                foreach (var c in chunks)
+                    if (c.detached && c.transform != null) Destroy(c.transform.gameObject);
+                IsDone = true;
+            }
         }
 
         void OnDestroy()
@@ -819,6 +944,9 @@ namespace SnowCannon
             foreach (var c in chunks)
             {
                 if (c.material != null) Destroy(c.material);
+                // Safety net: if the snowman is torn down mid-death, the detached chunks are not
+                // children of the root and would otherwise be orphaned in the scene.
+                if (c.detached && c.transform != null) Destroy(c.transform.gameObject);
             }
         }
     }

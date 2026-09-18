@@ -218,7 +218,9 @@ namespace SnowCannon
             if (lake != null) Mat.SetShadows(lake.gameObject, false, false);
 
             GameSession.BeginRun();
-            level = 1;
+            // Start on the level the player picked on the title screen (clamped to the highest they
+            // have ever reached), so a seasoned player can skip the easy opening levels.
+            level = Mathf.Clamp(Settings.StartLevel, 1, Mathf.Max(1, Settings.MaxLevelReached));
             score = 0;
             hits = 0;
             comboStreak = 0;
@@ -460,10 +462,10 @@ namespace SnowCannon
                     continue;
                 }
 
-                // A snowman that wanders into the lake (or its grass bank / the supply hose) is not a
-                // breach -- it simply melts into the water and is gone. Only reaching the defeat line
-                // or the cannon itself ends the run. The proximity tests are done here (the director
-                // owns the geometry) rather than via physics colliders, so they are deterministic and
+                // Reaching the lake (or its grass bank / the supply hose) now ends the run exactly
+                // like the defeat line or the cannon itself: a snowman that touches the water is a
+                // breach, not a harmless melt. The proximity tests are done here (the director owns
+                // the geometry) rather than via physics colliders, so they are deterministic and
                 // cannot be missed by a fast-moving snowman.
                 if (!sm.IsDying)
                 {
@@ -471,7 +473,9 @@ namespace SnowCannon
                     if (lake != null && lake.TouchesSnowman(sp, sm.FootprintRadius))
                     {
                         sm.Melt();
-                        continue;
+                        if (objective != null) objective.OnBreach();
+                        GameOver(false);
+                        return;
                     }
                     bool breach = sp.z <= GameConfig.DefeatZ;
                     if (!breach && cannon != null)
@@ -735,8 +739,9 @@ namespace SnowCannon
             else if (kb.digit4Key.wasPressedThisFrame) SelectShot(ShotType.Blizzard);
         }
 
-        /// <summary>Spawns the kids / penguins that waddle across the near field on a lazy cadence.
-        /// They are a hazard, not a target: hitting one costs points and water.</summary>
+        /// <summary>Spawns the penguins that waddle across the near field on a lazy cadence.
+        /// They are a hazard, not a target: hitting one costs points and water. They only start
+        /// appearing from level 3 -- one at level 3, two at level 4, three from level 5 up.</summary>
         void UpdateFriendlies()
         {
             for (int i = friendlies.Count - 1; i >= 0; i--)
@@ -749,12 +754,17 @@ namespace SnowCannon
                 }
             }
 
+            // Hazard ramp: the near field stays clean through levels 1-2, then carries 1 / 2 / 3
+            // penguins on levels 3 / 4 / 5+ (three is the permanent cap for every later level).
+            int maxFriendlies = level < 3 ? 0 : (level == 3 ? 1 : (level == 4 ? 2 : 3));
+            if (maxFriendlies == 0) return;
+
             friendlyTimer -= Time.deltaTime;
             if (friendlyTimer > 0f) return;
             friendlyTimer = Random.Range(7f, 13f);
 
-            // Only let a couple be on screen at once so the field never gets crowded with no-hits.
-            if (friendlies.Count >= 2) return;
+            // Keep the on-screen count under the level's cap so the field never floods with no-hits.
+            if (friendlies.Count >= maxFriendlies) return;
             bool fromLeft = Random.value < 0.5f;
             float x = fromLeft ? -(GameConfig.FieldHalfWidth + 2f) : (GameConfig.FieldHalfWidth + 2f);
             float z = Random.Range(GameConfig.CannonMinZ + 1f, GameConfig.CannonMaxZ + 3f);
@@ -814,7 +824,15 @@ namespace SnowCannon
             var options = new UpgradeType[n];
             for (int i = 0; i < n; i++) options[i] = pool[i];
 
-            levelUpUI = LevelUpUI.Show(options, _ => { levelUpUI = null; AdvanceLevel(); });
+            // The run locks the cursor away for aiming; the level-up overlay needs it back so the
+            // player can see and click a card. Re-lock it once a card is picked (or none offered).
+            ConfigureCursorForMenu();
+            levelUpUI = LevelUpUI.Show(options, _ =>
+            {
+                levelUpUI = null;
+                ConfigureCursorForPlay();
+                AdvanceLevel();
+            });
         }
 
         /// <summary>Commits a level advance after a pick (or when nothing was offerable).</summary>
@@ -823,7 +841,27 @@ namespace SnowCannon
             level++;
             levelTimer = GameConfig.LevelDuration(level);
             objective = mode == GameMode.Classic ? Objective.Roll(level) : null;
+
+            // Classic levels begin on an EMPTY plane: wipe out every snowman (and the boss) left
+            // over from the previous level so the new level starts clean rather than inheriting a
+            // half-cleared field. Endless never reaches here (it just hardens in place).
+            ClearField();
+
             MaybeSpawnBoss();
+        }
+
+        /// <summary>Destroys every living snowman and the boss, leaving the field empty for a fresh
+        /// classic level. Called at the classic level boundary (AdvanceLevel).</summary>
+        void ClearField()
+        {
+            for (int i = active.Count - 1; i >= 0; i--)
+            {
+                var sm = active[i];
+                if (sm != null) Destroy(sm.gameObject);
+            }
+            active.Clear();
+            Snowman.ClearAll();
+            if (boss != null) { Destroy(boss.gameObject); boss = null; }
         }
 
         /// <summary>Pays out the current objective's reward if it completed, then clears it.</summary>

@@ -146,26 +146,24 @@ namespace SnowCannon
         public const float HitStopScale = 0.1f;
 
         // ---- Level progression -------------------------------------------------
-        public const int FirstLevelDuration = 60;
+        public const int FirstLevelDuration = 45;
         public const int SecondLevelDuration = 90;
         public const int LevelDurationStep = 10;
-        public const float FirstSpawnInterval = 1.3333f;
-        public const float SpawnIntervalFactor = 0.8f;
+        public const float FirstSpawnInterval = 7.0f;
+        public const float SpawnIntervalFactor = 1f / 1.5f;
         public const float MinSpawnInterval = 0.6f;
 
-        /// <summary>Level 1 = 60 s, then +1 s for every level after it (61, 62, 63, ...).</summary>
+        /// <summary>Level 1 = 45 s, then +1 s for every level after it (46, 47, 48, ...).</summary>
         public static int LevelDuration(int level)
         {
             return FirstLevelDuration + Mathf.Max(0, level - 1);
         }
 
-        /// <summary>Level 1 is deliberately gentle: twice the base cadence (2.6666 s) so the
-        /// opening minute breathes. Every level after it steps down by 80 % from the base,
-        /// floored at MinSpawnInterval.</summary>
+        /// <summary>Level 1 opens at FirstSpawnInterval (7 s) so the field breathes, then every
+        /// level after it spawns 1.5x faster (the interval divides by 1.5 per level), floored at
+        /// MinSpawnInterval so it never becomes an unbroken wall of snowmen.</summary>
         public static float SpawnInterval(int level)
         {
-            if (level <= 1)
-                return Mathf.Max(MinSpawnInterval, FirstSpawnInterval * 4f);
             float v = FirstSpawnInterval * Mathf.Pow(SpawnIntervalFactor, Mathf.Max(0, level - 1));
             return Mathf.Max(MinSpawnInterval, v);
         }
@@ -243,6 +241,8 @@ namespace SnowCannon
         const string KeySensitivity = "sc_mouse_sensitivity";
         const string KeyInvertY = "sc_invert_y";
         const string KeyHighScore = "sc_high_score";
+        const string KeyMaxLevel = "sc_max_level";
+        const string KeyStartLevel = "sc_start_level";
         const string KeyVolume = "sc_volume";
         const string KeyCannonSound = "sc_cannon_sound";
         const string KeySnowmanSound = "sc_snowman_sound";
@@ -343,9 +343,36 @@ namespace SnowCannon
             }
         }
 
+        /// <summary>The highest level the player has ever reached across all runs. Only ever grows,
+        /// so it is a true lifetime best. Drives the title-screen start-level picker and is shown
+        /// on the high-score board. Reset back to 1 together with the high score.</summary>
+        public static int MaxLevelReached
+        {
+            get { return Mathf.Max(1, PlayerPrefs.GetInt(KeyMaxLevel, 1)); }
+            set
+            {
+                if (value > PlayerPrefs.GetInt(KeyMaxLevel, 1))
+                {
+                    PlayerPrefs.SetInt(KeyMaxLevel, value);
+                    PlayerPrefs.Save();
+                }
+            }
+        }
+
+        /// <summary>The level the next run starts on, chosen on the title screen and clamped to
+        /// 1..MaxLevelReached so a player can never jump ahead of the level they have actually
+        /// reached. Reset back to 1 together with the high score.</summary>
+        public static int StartLevel
+        {
+            get { return Mathf.Clamp(PlayerPrefs.GetInt(KeyStartLevel, 1), 1, MaxLevelReached); }
+            set { PlayerPrefs.SetInt(KeyStartLevel, Mathf.Clamp(value, 1, MaxLevelReached)); PlayerPrefs.Save(); }
+        }
+
         public static void ResetHighScore()
         {
             PlayerPrefs.DeleteKey(KeyHighScore);
+            PlayerPrefs.DeleteKey(KeyMaxLevel);
+            PlayerPrefs.DeleteKey(KeyStartLevel);
             PlayerPrefs.Save();
         }
 

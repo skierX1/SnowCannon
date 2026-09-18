@@ -72,13 +72,16 @@ namespace SnowCannon
 
         void SpawnOne()
         {
-            // Enter from a random edge, just outside the TRUE visible width at the skier depth
-            // (uncapped), so they cross the whole screen rather than only its middle.
-            float half = GameConfig.BackgroundHalfWidthAtZ(cam, SkierZ);
+            // Spread skiers across several depth lanes (not all on one line) and let some enter well
+            // beyond the visible edge, so the far background reads as a scattered field of people
+            // rather than a single-file parade marching along one lane at one distance.
+            float z = SkierZ + Random.Range(-6f, 6f);
+            float half = GameConfig.BackgroundHalfWidthAtZ(cam, z);
             bool fromLeft = Random.value < 0.5f;
-            float startX = fromLeft ? -(half + 2f) : (half + 2f);
+            float extra = Random.Range(2f, 10f);   // some enter far out, not all at the same line
+            float startX = fromLeft ? -(half + extra) : (half + extra);
             float dir = fromLeft ? 1f : -1f;
-            var s = Skier.Spawn(transform, cam, new Vector3(startX, 0f, SkierZ), dir);
+            var s = Skier.Spawn(transform, cam, new Vector3(startX, 0f, z), dir);
             live.Add(s);
         }
 

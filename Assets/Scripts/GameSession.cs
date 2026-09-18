@@ -28,6 +28,9 @@ namespace SnowCannon
             LastSnowmenHit = hits;
             LastRunCompleted = survived;
             Settings.HighScore = score;
+            // The level this run died on is its furthest point; the setter only ever grows it, so
+            // this records a lifetime best that the start-level picker is capped to.
+            Settings.MaxLevelReached = level;
             Settings.Save();
         }
     }
