@@ -40,6 +40,8 @@ namespace SnowCannon
         // these gains are not clipped back down to the old single-source speed.
         const float KeyGain = 1.5f;
         const float MouseDesktopGain = 6f;
+        // Multiplies the in-play mouse response by 1.5x (applied on top of the stored sensitivity).
+        const float PlayMouseGain = 1.5f;
         const float TouchGain = 2.2f;
         const float MaxMove = 1.8f;
 
@@ -120,7 +122,9 @@ namespace SnowCannon
                 mouse = lookDelta.ReadValue<Vector2>();
             // On desktop (Windows) raise the mouse gain so the cannon tracks the pointer briskly;
             // touch devices keep the tuned 1x so the stick and swipe stay comfortable.
-            mouse *= Settings.MouseSensitivity * 0.06f * (s_desktop ? MouseDesktopGain : 1f);
+            // PlayMouseGain raises the in-play pointer response by 1.5x on top of the stored
+            // sensitivity, per the player's request for a snappier aim during play.
+            mouse *= Settings.MouseSensitivity * 0.06f * (s_desktop ? MouseDesktopGain : 1f) * PlayMouseGain;
             if (Settings.InvertY) mouse.y = -mouse.y;
             // A resting hand must never make the cannon creep.
             if (mouse.sqrMagnitude < 0.0004f) mouse = Vector2.zero;

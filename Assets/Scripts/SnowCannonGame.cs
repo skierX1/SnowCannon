@@ -221,6 +221,8 @@ namespace SnowCannon
             // Start on the level the player picked on the title screen (clamped to the highest they
             // have ever reached), so a seasoned player can skip the easy opening levels.
             level = Mathf.Clamp(Settings.StartLevel, 1, Mathf.Max(1, Settings.MaxLevelReached));
+            Snowball.SetSpeedForLevel(level);
+            if (lake != null) lake.SetCapacityForLevel(level);
             score = 0;
             hits = 0;
             comboStreak = 0;
@@ -417,6 +419,8 @@ namespace SnowCannon
                     return;
                 }
                 level++;
+                Snowball.SetSpeedForLevel(level);
+                if (lake != null) lake.SetCapacityForLevel(level);
                 levelTimer = GameConfig.LevelDuration(level);
                 MaybeSpawnBoss();
             }
@@ -839,6 +843,8 @@ namespace SnowCannon
         void AdvanceLevel()
         {
             level++;
+            Snowball.SetSpeedForLevel(level);
+            if (lake != null) lake.SetCapacityForLevel(level);
             levelTimer = GameConfig.LevelDuration(level);
             objective = mode == GameMode.Classic ? Objective.Roll(level) : null;
 
@@ -1164,7 +1170,7 @@ namespace SnowCannon
 
             Vector3 center = target.transform.position + new Vector3(0f, 1.0f, 0f);
             Vector3 origin = cannon != null ? cannon.MuzzleWorldPosition : new Vector3(0f, 1.4f, -4f);
-            Vector3 dir = BallisticDir(origin, center, Snowball.LaunchSpeed, Snowball.Gravity);
+            Vector3 dir = BallisticDir(origin, center, Snowball.EffectiveLaunchSpeed, Snowball.Gravity);
             SpawnSnowball(origin, dir);
         }
 

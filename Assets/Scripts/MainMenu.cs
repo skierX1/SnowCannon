@@ -724,23 +724,26 @@ namespace SnowCannon
 
             var card = Ui.NewRect("card", Ui.Rt(highScorePanel));
             Ui.Place(card, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     Vector2.zero, new Vector2(560f, 430f));
+                     Vector2.zero, new Vector2(560f, 560f));
             Ui.AddPanel(card, "bg", new Color(0.06f, 0.13f, 0.21f, 0.96f), false);
 
+            // A strict top-down stack with measured gaps so nothing overlaps. The card is 560 tall.
+            // Bands, measured from the card's TOP edge: HEAD 20..100, SCORE 110..230, MAX LEVEL
+            // 242..298, then the two buttons pinned to the bottom (RESET 340..410, BACK 431..505).
+            // Every band has a clear gap to its neighbours, so MAX LEVEL is fully visible -- it
+            // previously overlapped the RESET button and was hidden.
             var head = Ui.AddText(card, "head", "HIGH SCORE", 52, GameConfig.CannonYellow, TextAnchor.MiddleCenter);
             Ui.Place(Ui.Rt(head.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                     new Vector2(0f, -30f), new Vector2(500f, 80f));
+                     new Vector2(0f, -60f), new Vector2(500f, 80f));
 
             highScoreValue = Ui.AddText(card, "value", "0", 80, Color.white, TextAnchor.MiddleCenter);
-            Ui.Place(Ui.Rt(highScoreValue.gameObject), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     new Vector2(0f, 80f), new Vector2(500f, 120f));
+            Ui.Place(Ui.Rt(highScoreValue.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                     new Vector2(0f, -170f), new Vector2(500f, 120f));
 
-            // The lifetime best level, shown under the score so the player can see how far they have
-            // ever gotten (and how high the start-level picker will let them jump).
             maxLevelValue = Ui.AddText(card, "maxlevel", "MAX LEVEL  1", 34,
                                       new Color(0.7f, 0.9f, 1f, 1f), TextAnchor.MiddleCenter);
-            Ui.Place(Ui.Rt(maxLevelValue.gameObject), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                     new Vector2(0f, -30f), new Vector2(500f, 60f));
+            Ui.Place(Ui.Rt(maxLevelValue.gameObject), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                     new Vector2(0f, -270f), new Vector2(500f, 55f));
 
             Ui.AddButton(card, "reset", "RESET HIGH SCORE", new Vector2(420f, 70f), 30,
                         new Color(0.8f, 0.25f, 0.2f, 1f), OnResetHighScore);

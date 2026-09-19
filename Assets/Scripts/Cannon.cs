@@ -100,7 +100,9 @@ namespace SnowCannon
         // Total sweep is 160 degrees (±80). Widened from ±40 so the far-left and far-right
         // snowmen that spawn across the whole visible width are all reachable on a phone screen.
         const float MaxYaw = 80f;
-        const float MinPitch = 4f;
+        // Lowered by 10 degrees (4 -> -6) so the barrel can be depressed further and reach shots
+        // that land close to the cannon, per the player's request to fire more downward.
+        const float MinPitch = -6f;
         const float MaxPitch = 46f;
 
         public static Cannon Create(SnowCannonGame owner)

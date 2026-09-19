@@ -21,7 +21,15 @@ namespace SnowCannon
         /// <summary>World position of the pond's centre, used to route the supply hose.</summary>
         public Vector3 WorldPosition => transform.position;
 
-        const int Max = GameConfig.LakeMaxMarks;
+        // The reservoir's capacity grows by LakeMarksPerLevel marks for every level beyond the
+        // first, so a longer run can bank more water. The director drives this at each level
+        // boundary via SetCapacityForLevel; until then it sits at the base capacity.
+        int capacity = GameConfig.LakeMaxMarks;
+        int Max { get { return capacity; } }
+        public void SetCapacityForLevel(int level)
+        {
+            capacity = GameConfig.LakeMaxMarks + Mathf.Max(0, level - 1) * GameConfig.LakeMarksPerLevel;
+        }
         const int SpawnGain = GameConfig.LakeSpawnGain;
         const int FireCost = GameConfig.LakeFireCost;
 
@@ -526,6 +534,11 @@ namespace SnowCannon
             Vector3 p = r.origin + r.direction * t;
             float lakeX = Mathf.Clamp(p.x, -45f, -1f);
             float lakeZ = Mathf.Clamp(p.z, -11f, -3f);
+            // The player asked to slide the pond left by half its own footprint so half of it hangs
+            // off the left edge of the screen. This is a PURE TRANSLATION -- the pond's scale is
+            // untouched (sizing lives only in SizeAgainstCannon), so only the centre moves left by
+            // FootR * Scale, which is exactly half the footprint width.
+            lakeX -= FootR * Scale;
             anchorPos = new Vector3(lakeX, 0f, lakeZ);
             basePos = anchorPos;
             transform.position = anchorPos;

@@ -64,6 +64,9 @@ namespace SnowCannon
         public const int LakeSpawnGain = 2;
         public const int LakeFireCost = 1;
         public const int LakeStartMarks = 45;
+        /// <summary>How many extra marks of reservoir capacity each level beyond the first adds,
+        /// so a longer run can bank more water. The lake's ceiling is LakeMaxMarks + (level-1) * this.</summary>
+        public const int LakeMarksPerLevel = 4;
 
         // ---- Scoring -----------------------------------------------------------
         public const int PointsHead = 2;
@@ -150,7 +153,12 @@ namespace SnowCannon
         public const int SecondLevelDuration = 90;
         public const int LevelDurationStep = 10;
         public const float FirstSpawnInterval = 7.0f;
-        public const float SpawnIntervalFactor = 1f / 1.5f;
+        /// <summary>The single step from level 1 to level 2: the interval shortens by 20 %.</summary>
+        public const float SecondLevelFactor = 0.8f;
+        /// <summary>Every step after level 2 shortens the interval by 10 % (multiply by 0.9). The
+        /// old 1.5x-per-level curve collapsed to sub-second spawns by level 6 and made levels 5-6
+        /// near-unplayable; this gentler ramp keeps late levels demanding but survivable.</summary>
+        public const float PerLevelFactor = 0.9f;
         public const float MinSpawnInterval = 0.6f;
 
         /// <summary>Level 1 = 45 s, then +1 s for every level after it (46, 47, 48, ...).</summary>
@@ -159,12 +167,14 @@ namespace SnowCannon
             return FirstLevelDuration + Mathf.Max(0, level - 1);
         }
 
-        /// <summary>Level 1 opens at FirstSpawnInterval (7 s) so the field breathes, then every
-        /// level after it spawns 1.5x faster (the interval divides by 1.5 per level), floored at
-        /// MinSpawnInterval so it never becomes an unbroken wall of snowmen.</summary>
+        /// <summary>Level 1 opens at FirstSpawnInterval (7 s) so the field breathes; the step to
+        /// level 2 shortens it by 20 % (7 -> 5.6 s) and every step after that shortens it by 10 %
+        /// (5.6, 5.04, 4.54, 4.08, 3.67 ...), floored at MinSpawnInterval so it never becomes an
+        /// unbroken wall of snowmen.</summary>
         public static float SpawnInterval(int level)
         {
-            float v = FirstSpawnInterval * Mathf.Pow(SpawnIntervalFactor, Mathf.Max(0, level - 1));
+            if (level <= 1) return Mathf.Max(MinSpawnInterval, FirstSpawnInterval);
+            float v = FirstSpawnInterval * SecondLevelFactor * Mathf.Pow(PerLevelFactor, Mathf.Max(0, level - 2));
             return Mathf.Max(MinSpawnInterval, v);
         }
 

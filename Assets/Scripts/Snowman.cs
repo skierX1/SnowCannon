@@ -911,6 +911,11 @@ namespace SnowCannon
                 c.material.SetColor("_BaseColor", bc);
 
                 if (!c.detached) continue;
+                // The chunk's GameObject may already have been destroyed (the k>=1 cleanup or an
+                // OnDestroy from a scene teardown). Update() keeps calling UpdateDeath every frame
+                // while IsDying is set, so touching a dead transform here throws a
+                // NullReferenceException -- skip any chunk whose transform is gone.
+                if (c.transform == null) continue;
 
                 c.velocity.y -= 14f * Time.deltaTime;
                 c.transform.position += c.velocity * Time.deltaTime;

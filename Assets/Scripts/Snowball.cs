@@ -38,6 +38,18 @@ namespace SnowCannon
         public static readonly float Gravity = GameConfig.SnowballGravity / 1.5f;
         public static readonly float LifeTime = GameConfig.SnowballLifeTime * 1.6f;
 
+        // The shot flies 10% faster for every level beyond the first, so later levels feel snappier
+        // and the flatter, faster arc is harder to lead. The director drives this at each level
+        // boundary via SetSpeedForLevel. The live ball AND every aim aid (the ground reticle, the
+        // trajectory ribbon, the boss's own ballistic solve) all read the SAME effective speed, so a
+        // faster ball is never predicted with the old slow arc -- the guide always matches reality.
+        public static float SpeedMult = 1f;
+        public static void SetSpeedForLevel(int level)
+        {
+            SpeedMult = Mathf.Pow(1.1f, Mathf.Max(0, level - 1));
+        }
+        public static float EffectiveLaunchSpeed { get { return LaunchSpeed * SpeedMult; } }
+
         // Highest point a shot can physically reach, v²/2g above the muzzle, plus headroom.
         // The despawn test used a fixed ceiling of 24, which sits well below this, so every
         // shot aimed above roughly 33 degrees was deleted at the top of its own arc and
@@ -45,6 +57,10 @@ namespace SnowCannon
         // complaint. Deriving the bound from the launch values keeps mortar shots alive and
         // re-tunes itself automatically if the speed or gravity is ever adjusted.
         public static readonly float MaxHeight = LaunchSpeed * LaunchSpeed / (2f * Gravity) + 6f;
+
+        // The apex ceiling scales with the square of the launch speed, so a faster (higher-level)
+        // ball is not culled at the top of its own taller arc.
+        public static float EffectiveMaxHeight { get { float v = EffectiveLaunchSpeed; return v * v / (2f * Gravity) + 6f; } }
 
         // Horizontal despawn bound, likewise generous versus the logical field width (see Update).
         // Widened so a spray ball led out toward a far-edge skier (who crosses the full VISIBLE width
@@ -61,7 +77,7 @@ namespace SnowCannon
             go.transform.position = origin;
             var sb = go.AddComponent<Snowball>();
             sb.game = owner;
-            sb.velocity = direction.normalized * LaunchSpeed;
+            sb.velocity = direction.normalized * EffectiveLaunchSpeed;
             sb.life = LifeTime;
             sb.pierceLeft = Mathf.Max(1, pierce);
             sb.chills = chills;
@@ -143,7 +159,7 @@ namespace SnowCannon
             // ceiling is derived from the launch physics so a high arc is never culled at its apex.
             var p = transform.position;
             if (p.z > GameConfig.FieldMaxZ + 14f || p.z < GameConfig.FieldMinZ - 6f ||
-                Mathf.Abs(p.x) > DespawnHalfWidth || p.y > MaxHeight || p.y < -0.6f)
+                Mathf.Abs(p.x) > DespawnHalfWidth || p.y > EffectiveMaxHeight || p.y < -0.6f)
             {
                 Despawn();
             }
